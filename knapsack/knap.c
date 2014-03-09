@@ -5,7 +5,6 @@
 #include <string.h>
 
 int VERBOSE = 0;
-int DYNAMIC = 0;
 
 typedef enum {false, true} bool;
 
@@ -16,7 +15,6 @@ typedef struct {
     double relweight;
 } Item;
 
-
 typedef struct {
     Item *items;
     int capacity;
@@ -24,19 +22,14 @@ typedef struct {
     int *weights;
     int *values;
     double relaxation;
-    int *best;
-} Knapsack;
-
-typedef struct {
     int best_value;
-    bool *in_sack;
-} Result;
+} Knapsack;
 
 typedef struct {
     bool success;
     int value;
     bool *route;
-} RtnNode;
+} Result;
 
 int compare(const void *a, const void *b) {
     Item *x = (Item *)a;
@@ -60,43 +53,32 @@ double relax(int *weights_ord, int *values_ord, int startind, int endind, double
             break;
         }
     }
-    if (isinf(rlx)) {
-        exit(1);
-    }
-
+    if (isinf(rlx)) exit(1);
     return rlx;
 }
 
-
-RtnNode recurse(int value, int room, double estimate, Knapsack *ks, int depth) {
+Result traverse(int value, int room, double estimate, Knapsack *ks, int depth) {
     //check for endpoint
-    if (estimate < (double)*(ks->best)) {
-        //fail
-        RtnNode rtn = {false, 0, NULL};
-        return rtn;
-    } else if (depth >= ks->nitems) {
-        if (value > *(ks->best)) {
-            //win!
-            *(ks->best) = value;
+    Result rtn1 = {false, 0, NULL};
+    if (estimate < (double)(ks->best_value)) return rtn1; //fail
+    else if (depth >= ks->nitems) {
+        if (value > ks->best_value) {                     //win!
+            ks->best_value = value;
             if (VERBOSE) printf("New best: %d, room: %d\n", value, room);
             bool *route = calloc(depth, sizeof(bool));
-            RtnNode win =  {true, value, route};
+            Result win =  {true, value, route};
             return win;
-        } else {
-            //else fail
-            RtnNode rtn = {false, 0, NULL};
-            return rtn;
-        }
+        } else return rtn1;                               //fail
     }
+    // else branch
     int v = ks->values[depth];
     int w = ks->weights[depth];
-    RtnNode rtn1 = {false, 0, NULL};
     if (w <= room) {
         double est_n1 = value + v + relax(ks->weights, ks->values, depth+1, ks->nitems, room - w);
-        rtn1 = recurse(value + v, room - w, est_n1, ks, depth+1);
+        rtn1 = traverse(value + v, room - w, est_n1, ks, depth+1);
     }
     double est_n2 = value + relax(ks->weights, ks->values, depth+1, ks->nitems, room);
-    RtnNode rtn2 = recurse(value, room, est_n2, ks, depth+1);
+    Result rtn2 = traverse(value, room, est_n2, ks, depth+1);
     if (rtn1.success && rtn2.success) {
         if (rtn1.value > rtn2.value) {
             free(rtn2.route);
@@ -109,19 +91,12 @@ RtnNode recurse(int value, int room, double estimate, Knapsack *ks, int depth) {
     } else if (rtn1.success) {
         rtn1.route[depth] = true;
         return rtn1;
-    } else if (rtn2.success) {
-        return rtn2;
-    } else { 
-        //fail
-        RtnNode rtn = {false, 0, NULL};
-        return rtn;
-    }
+    } else if (rtn2.success) return rtn2; 
+    else return rtn1; //fail
 }
     
-Result branch_bound(Knapsack ks) {
-    RtnNode rtn = recurse(0, ks.capacity, ks.relaxation, &ks, 0);
-    Result res = {rtn.value, rtn.route};
-    return res;
+Result branch_bound(Knapsack *ks) {
+    return traverse(0, ks->capacity, ks->relaxation, ks, 0);
 }
 
 int **make2Darray(int rows, int cols) {
@@ -142,10 +117,10 @@ void printarr(int **arr, int imax, int jmax) {
     }
 }
 
-Result score(int **array, Knapsack ks) {
-    int i = ks.capacity;
-    int j = ks.nitems-1;
-    bool *resarr = calloc(ks.nitems, sizeof(bool *));
+Result score(int **array, Knapsack *ks) {
+    int i = ks->capacity;
+    int j = ks->nitems-1;
+    bool *resarr = calloc(ks->nitems, sizeof(bool *));
     while (i>0 && j>=0) {
         if (array[i][j] == array[i-1][j]) {
                 i--;
@@ -155,11 +130,11 @@ Result score(int **array, Knapsack ks) {
             j--;
         } else {
             resarr[j] = true;
-            i -= ks.items[j].weight;
+            i -= ks->items[j].weight;
             j--;
         }
     }
-    Result res = {array[ks.capacity][ks.nitems-1], resarr};
+    Result res = {true, array[ks->capacity][ks->nitems-1], resarr};
     return res;
 }
 
@@ -167,44 +142,41 @@ bool checkscore(Result res, Knapsack ks) {
     int sum = 0;
     int weight = 0;
     for (int i=0;i<ks.nitems;i++) {
-        if (res.in_sack[i]) {
+        if (res.route[i]) {
             weight += ks.items[i].weight;
             sum += ks.items[i].value;
         }
     }
-    if (weight <= ks.capacity && sum == res.best_value) {
+    if (weight <= ks.capacity && sum == ks.best_value) 
         return true;
-    } else {
+    else 
         return false;
-    }
 }
 
 
 
-Result dynprog(Knapsack ks) {
-    int **array = make2Darray(ks.capacity+1, ks.nitems);
+Result dynprog(Knapsack *ks) {
+    int **array = make2Darray(ks->capacity+1, ks->nitems);
     // init for i=0
-    int weight = ks.items[0].weight;
-    int value = ks.items[0].value;
-    for (int i=0;i<=ks.capacity;i++) {
-        if (weight <= i) {
-            array[i][0] = value;
-        } else {
-            array[i][0] = 0;
-        }
+    int weight = ks->items[0].weight;
+    int value = ks->items[0].value;
+    for (int i=0;i<=ks->capacity;i++) {
+        if (weight <= i)
+            (array[i][0] = value);
+        else 
+            (array[i][0] = 0);
     }
-    for (int j=1;j<ks.nitems;j++) {
-        int weight = ks.items[j].weight;
-        int value = ks.items[j].value;
-        for (int i=0;i<=ks.capacity;i++) {
+    for (int j=1;j<ks->nitems;j++) {
+        int weight = ks->items[j].weight;
+        int value = ks->items[j].value;
+        for (int i=0;i<=ks->capacity;i++) {
             int prev = array[i][j-1];
             if (i >= weight) {
                 int ifremove = array[i-weight][j-1];
-                if (value + ifremove > prev) {
-                    array[i][j] = value + ifremove;
-                } else {
-                    array[i][j] = prev;
-                }
+                if (value + ifremove > prev)
+                    (array[i][j] = value + ifremove);
+                else
+                    (array[i][j] = prev);
             } else {
                 array[i][j] = prev;
             }
@@ -222,11 +194,10 @@ void knapsort(Knapsack *ks) {
         weights[i] = ks->items[i].weight;
         vals[i] = ks->items[i].value;
     }
-    int *best = calloc(1, sizeof(int));
     ks->weights = weights;
     ks->values = vals;
     ks->relaxation = relax(weights, vals, 0, ks->nitems, ks->capacity);
-    ks->best = best;
+    ks->best_value = 0;
 }
 
 Knapsack parse_file(char *fpath) {
@@ -258,6 +229,7 @@ int main (int argc, char *argv[]) {
         printf("No file name specified\n");
         exit(1);
     }
+    int DYNAMIC = false;
     for (int i=1;i<argc;i++) {
         if (strcmp(argv[i],"-v") == 0)
             VERBOSE = true;
@@ -271,13 +243,13 @@ int main (int argc, char *argv[]) {
             printf("item %d: weight %d, value: %d, relweight: %0.2f\n", i, ks.items[i].weight, ks.items[i].value, ks.items[i].relweight);
         }
     }
-    Result res = DYNAMIC? dynprog(ks) : branch_bound(ks);
+    Result res = DYNAMIC? dynprog(&ks) : branch_bound(&ks);
     if (VERBOSE) printf("Linear Relaxation: %0.2f\n", ks.relaxation);
-    printf("%d 1\n", res.best_value);
+    printf("%d 1\n", ks.best_value);
     for (int i=0;i<ks.nitems;i++) {
         for (int j=0;j<ks.nitems;j++) {
             if (ks.items[j].index == i) {
-                printf("%d ", res.in_sack[j]);
+                printf("%d ", res.route[j]);
                 break;
             }
         }
