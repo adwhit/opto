@@ -17,10 +17,10 @@ typedef struct {
 
 typedef struct {
     Item *items;
-    int capacity;
     int nitems;
-    int *weights;
+    int capacity;
     int *values;
+    int *weights;
     double relaxation;
     int best_value;
 } Knapsack;
@@ -186,45 +186,65 @@ Result dynprog(Knapsack *ks) {
     return score(array, ks);
 }
 
-void knapsort(Knapsack *ks) {
-    qsort(ks->items, ks->nitems, sizeof(Item), compare);
-    int *weights = malloc(ks->nitems * sizeof(int));
-    int *vals = malloc(ks->nitems * sizeof(int));
-    for (int i=0; i<(ks->nitems); i++) {
-        weights[i] = ks->items[i].weight;
-        vals[i] = ks->items[i].value;
+Knapsack make_knapsack(int *values, int *weights, int nitems, int capacity) {
+    Item *items = calloc(nitems,sizeof(Item));
+    for (int i=0;i<nitems;i++ ) {
+        items[i].value = values[i];
+        items[i].weight = weights[i];
+        items[i].relweight = (double)items[i].value / (double)items[i].weight;
+        items[i].index = i;
     }
-    ks->weights = weights;
-    ks->values = vals;
-    ks->relaxation = relax(weights, vals, 0, ks->nitems, ks->capacity);
-    ks->best_value = 0;
+    qsort(items, nitems, sizeof(Item), compare);
+    //reassign values and weights
+    for (int i=0;i<nitems;i++ ) {
+        values[i] = items[i].value;
+        weights[i] = items[i].weight;
+    }
+    double relaxation = relax(weights, values, 0, nitems, capacity);
+    Knapsack ks = {items, nitems, capacity, values, weights, relaxation, 0};
+    return ks;
 }
 
 Knapsack parse_file(char *fpath) {
     int nitems;
     int capacity;
     FILE *myfile = fopen (fpath,"r");
-    Item *items = NULL;
     if (myfile == NULL) {
         perror ("Error opening file"); //or return 1;
         exit(1);
     }
     fscanf(myfile, "%d %d", &nitems, &capacity);
-    items = (Item *)calloc(nitems,sizeof(Item));
-    for (int i=0;i<nitems;i++ ) {
-        fscanf(myfile, "%d %d", &(items[i].value), &(items[i].weight));
-        items[i].relweight = (double)items[i].value / (double)items[i].weight;
-        items[i].index = i;
+    int *values = malloc(nitems * sizeof(int));
+    int *weights = malloc(nitems * sizeof(int));
+    for (int i=0; i<(nitems); i++) {
+        fscanf(myfile, "%d %d", &(values[i]), &(weights[i]));
     }
-    //sort descending
+
     fclose(myfile);
-    Knapsack ks = {items, capacity, nitems, NULL};
-    knapsort(&ks);
-    return ks;
+    return make_knapsack(values, weights, nitems, capacity);
 }
 
+void unsort(Result *res, Knapsack *ks) {
+    bool *unsortedroute = calloc(ks->capacity, sizeof(bool));
+    for (int i=0;i<ks->nitems;i++) {
+        for (int j=0;j<ks->nitems;j++) {
+            if (ks->items[j].index == i) {
+                unsortedroute[i] = res->route[j];
+                break;
+            }
+        }
+    }
+    res->route = unsortedroute;
+}
 
-int main (int argc, char *argv[]) {
+Result run(int *values, int *weights, int nitems, int capacity) {
+    Knapsack ks = make_knapsack(values, weights, nitems, capacity);
+    Result res = branch_bound(&ks);
+    unsort(&res, &ks);
+    return res;
+}
+
+int _main (int argc, char *argv[]) {
     if (argc < 2) {
         printf("No file name specified\n");
         exit(1);
@@ -246,14 +266,9 @@ int main (int argc, char *argv[]) {
     Result res = DYNAMIC? dynprog(&ks) : branch_bound(&ks);
     if (VERBOSE) printf("Linear Relaxation: %0.2f\n", ks.relaxation);
     printf("%d 1\n", ks.best_value);
-    for (int i=0;i<ks.nitems;i++) {
-        for (int j=0;j<ks.nitems;j++) {
-            if (ks.items[j].index == i) {
-                printf("%d ", res.route[j]);
-                break;
-            }
-        }
-    }
+    unsort(&res, &ks);
+    for (int i=0;i<ks.nitems;i++)
+        printf("%d ", res.route[i]);
     printf("\n");
     if (VERBOSE) {
         char *errck = checkscore(res, ks) ? "Passed" : "Failed";

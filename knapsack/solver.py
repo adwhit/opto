@@ -3,20 +3,37 @@
 
 import sys
 import os
-from subprocess import Popen, PIPE
+from cffi import FFI
 
 def solve_it(input_data):
+    arr = [(int(n[0]), int(n[1])) for n in [line.split() for line in input_data.split("\n") if line]]
+    nitems = arr[0][0]
+    capacity = arr[0][1]
+    values, weights = zip(*arr[1:])
 
-    tmp_file_name = 'tmp.data'
-    tmp_file = open(tmp_file_name, 'w')
-    tmp_file.write(input_data)
-    tmp_file.close()
+    ffi = FFI()
 
-    process = Popen(['./knap', tmp_file_name], stdout=PIPE)
-    (stdout, stderr) = process.communicate()
+    ffi.cdef("""
+    typedef enum {false, true} bool;
 
-    os.remove(tmp_file_name)
-    return stdout.strip()
+    typedef struct {
+        bool success;
+        int value;
+        bool *route;
+    } Result;
+
+    Result run(int *values, int *weights, int nitems, int capacity);
+    """)
+
+    fpath = "data/ks_4_0"
+
+    lib = ffi.dlopen("libknap.so")
+    res = lib.run(values, weights, nitems, capacity)
+
+    out = "%d 1\n" % res.value
+    out += " ".join([str(res.route[i]) for i in range(nitems)])
+
+    return out
 
 
 
