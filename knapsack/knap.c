@@ -244,7 +244,7 @@ Result run(int *values, int *weights, int nitems, int capacity) {
     return res;
 }
 
-int _main (int argc, char *argv[]) {
+int main (int argc, char *argv[]) {
     if (argc < 2) {
         printf("No file name specified\n");
         exit(1);
