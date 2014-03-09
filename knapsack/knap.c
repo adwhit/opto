@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
 typedef enum {false, true} bool;
 
@@ -11,10 +12,15 @@ typedef struct {
     double relweight;
 } Item;
 
+
 typedef struct {
     Item *items;
     int capacity;
     int nitems;
+    int *weights;
+    int *values;
+    double relaxation;
+    int *best;
 } Knapsack;
 
 typedef struct {
@@ -32,61 +38,68 @@ int compare(const void *a, const void *b) {
     Item *x = (Item *)a;
     Item *y = (Item *)b;
     if ((*x).relweight > (*y).relweight) return -1;
-    else if ((*x).relweight < (*y).relweight) return 1; return 0;
+    else if ((*x).relweight < (*y).relweight) return 1; 
+    //secondary sort
+    else if ((*x).weight > (*y).weight) return -1; 
+    else if ((*x).weight < (*y).weight) return 1; 
+    return 0;
 }
 
-double relax(Knapsack ks) {
-    double *arr = malloc(ks.nitems * sizeof(double));
-    double remaincap = (double)ks.capacity;
-    double sum = 0;
-    for (int i=0;i<ks.nitems;i++) {
-        if (remaincap > ks.items[i].weight) {
-            arr[i] = 1.0;
-            sum += ks.items[i].value;
-            remaincap -= (double)ks.items[i].weight;
+double relax(int *weights_ord, int *values_ord, int startind, int endind, double capacity) {
+    double rlx = 0;
+    for (int i=startind;i<endind;i++) {
+        if (capacity > weights_ord[i]) {
+            rlx += values_ord[i];
+            capacity -= (double)weights_ord[i];
         } else {
-            double frac = remaincap/(double)ks.items[i].weight;
-            arr[i] = frac;
-            sum += (double)ks.items[i].value * frac;
+            rlx += values_ord[i] * capacity/(double)weights_ord[i];
             break;
         }
     }
-    return sum;
+    if (isinf(rlx)) {
+        exit(1);
+    }
+
+    return rlx;
 }
 
-RtnNode recurse(int value, int room, double estimate, int best, Knapsack *ks, int depth) {
+
+RtnNode recurse(int value, int room, double estimate, Knapsack *ks, int depth) {
     //check for endpoint
-    printf("value %d | room %d | est %0.1f | best %d | depth %d\n", 
-            value, room, estimate, best, depth);
-    if (room < 0 || estimate < (double)best) {
+    if (estimate < (double)*(ks->best)) {
         //fail
         RtnNode rtn = {false, 0, NULL};
         return rtn;
-    } else if (depth == ks->nitems) {
-        if (value > best) {
-        //win!
-        bool *route = calloc(depth, sizeof(bool));
-        RtnNode win =  {true, value, route};
-        return win;
+    } else if (depth >= ks->nitems) {
+        if (value > *(ks->best)) {
+            //win!
+            *(ks->best) = value;
+            //printf("New best: %d, room: %d\n", value, room);
+            bool *route = calloc(depth, sizeof(bool));
+            RtnNode win =  {true, value, route};
+            return win;
         } else {
             //else fail
             RtnNode rtn = {false, 0, NULL};
             return rtn;
         }
     }
-
-    int v = ks->items[depth].value;
-    int w = ks->items[depth].weight;
-
-    RtnNode rtn1 = recurse(value + v, room - w, estimate, best, ks, depth+1);
-    if (rtn1.success) { best = rtn1.value; }
-    // XXX THIS IS WRONG - NEED TO RECALCULATE RELAXATION PROPERLY
-    RtnNode rtn2 = recurse(value, room, estimate - v, best, ks, depth+1);
+    int v = ks->values[depth];
+    int w = ks->weights[depth];
+    RtnNode rtn1 = {false, 0, NULL};
+    if (w <= room) {
+        double est_n1 = value + v + relax(ks->weights, ks->values, depth+1, ks->nitems, room - w);
+        rtn1 = recurse(value + v, room - w, est_n1, ks, depth+1);
+    }
+    double est_n2 = value + relax(ks->weights, ks->values, depth+1, ks->nitems, room);
+    RtnNode rtn2 = recurse(value, room, est_n2, ks, depth+1);
     if (rtn1.success && rtn2.success) {
         if (rtn1.value > rtn2.value) {
+            free(rtn2.route);
             rtn1.route[depth] = true;
             return rtn1;
         } else {
+            free(rtn1.route);
             return rtn2;
         }
     } else if (rtn1.success) {
@@ -102,8 +115,7 @@ RtnNode recurse(int value, int room, double estimate, int best, Knapsack *ks, in
 }
     
 Result branch_bound(Knapsack ks) {
-    double relx = relax(ks);
-    RtnNode rtn = recurse(0, ks.capacity, relx, 0, &ks, 0);
+    RtnNode rtn = recurse(0, ks.capacity, ks.relaxation, &ks, 0);
     Result res = {rtn.value, rtn.route};
     return res;
 }
@@ -198,6 +210,21 @@ Result dynprog(Knapsack ks) {
     return score(array, ks);
 }
 
+void knapsort(Knapsack *ks) {
+    qsort(ks->items, ks->nitems, sizeof(Item), compare);
+    int *weights = malloc(ks->nitems * sizeof(int));
+    int *vals = malloc(ks->nitems * sizeof(int));
+    for (int i=0; i<(ks->nitems); i++) {
+        weights[i] = ks->items[i].weight;
+        vals[i] = ks->items[i].value;
+    }
+    int *best = calloc(1, sizeof(int));
+    ks->weights = weights;
+    ks->values = vals;
+    ks->relaxation = relax(weights, vals, 0, ks->nitems, ks->capacity);
+    ks->best = best;
+}
+
 Knapsack parse_file(char *fpath) {
     int nitems;
     int capacity;
@@ -216,10 +243,11 @@ Knapsack parse_file(char *fpath) {
     }
     //sort descending
     fclose(myfile);
-    Knapsack ks = {items, capacity, nitems};
-    qsort(ks.items, ks.nitems, sizeof(Item), compare);
+    Knapsack ks = {items, capacity, nitems, NULL};
+    knapsort(&ks);
     return ks;
 }
+
 
 int main (int argc, char *argv[]) {
     if (argc != 2) {
@@ -229,16 +257,19 @@ int main (int argc, char *argv[]) {
     Knapsack ks = parse_file(argv[1]);
     printf("Items: %d  Capacity: %d\n", ks.nitems, ks.capacity);
     for (int i=0;i<ks.nitems;i++) {
-        printf("item %d: weight %d, value: %d\n", i, ks.items[i].weight, ks.items[i].value);
+        printf("item %d: weight %d, value: %d, relweight: %0.2f\n", i, ks.items[i].weight, ks.items[i].value, ks.items[i].relweight);
     }
     //Result res = dynprog(ks);
     Result res = branch_bound(ks);
+    printf("Linear Relaxation: %0.2f\n", ks.relaxation);
     printf("Score: %d\n", res.best_value);
     for (int i=0;i<ks.nitems;i++) {
-        printf("%d ", res.in_sack[i]);
+        if (res.in_sack[i]) {
+        //printf("%i ", i);
+        }
     }
     printf("\n");
-    printf("success: %d\n", checkscore(res, ks));
-    printf("relaxation: %0.2f\n", relax(ks));
+    char *errck = checkscore(res, ks) ? "Passed" : "Failed";
+    printf("Check sum: %s\n", errck);
     return 0;
 }
