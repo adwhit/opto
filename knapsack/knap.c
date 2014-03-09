@@ -275,7 +275,12 @@ int main (int argc, char *argv[]) {
     if (VERBOSE) printf("Linear Relaxation: %0.2f\n", ks.relaxation);
     printf("%d 1\n", res.best_value);
     for (int i=0;i<ks.nitems;i++) {
-        printf("%d ", res.in_sack[i]);
+        for (int j=0;j<ks.nitems;j++) {
+            if (ks.items[j].index == i) {
+                printf("%d ", res.in_sack[j]);
+                break;
+            }
+        }
     }
     printf("\n");
     if (VERBOSE) {
