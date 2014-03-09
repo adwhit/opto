@@ -2,6 +2,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <string.h>
+
+int VERBOSE = 0;
+int DYNAMIC = 0;
 
 typedef enum {false, true} bool;
 
@@ -74,7 +78,7 @@ RtnNode recurse(int value, int room, double estimate, Knapsack *ks, int depth) {
         if (value > *(ks->best)) {
             //win!
             *(ks->best) = value;
-            //printf("New best: %d, room: %d\n", value, room);
+            if (VERBOSE) printf("New best: %d, room: %d\n", value, room);
             bool *route = calloc(depth, sizeof(bool));
             RtnNode win =  {true, value, route};
             return win;
@@ -250,26 +254,33 @@ Knapsack parse_file(char *fpath) {
 
 
 int main (int argc, char *argv[]) {
-    if (argc != 2) {
+    if (argc < 2) {
         printf("No file name specified\n");
         exit(1);
     }
-    Knapsack ks = parse_file(argv[1]);
-    printf("Items: %d  Capacity: %d\n", ks.nitems, ks.capacity);
-    for (int i=0;i<ks.nitems;i++) {
-        printf("item %d: weight %d, value: %d, relweight: %0.2f\n", i, ks.items[i].weight, ks.items[i].value, ks.items[i].relweight);
+    for (int i=1;i<argc;i++) {
+        if (strcmp(argv[i],"-v") == 0)
+            VERBOSE = true;
+        if (strcmp(argv[i],"-d") == 0)
+            DYNAMIC = true;
     }
-    //Result res = dynprog(ks);
-    Result res = branch_bound(ks);
-    printf("Linear Relaxation: %0.2f\n", ks.relaxation);
-    printf("Score: %d\n", res.best_value);
-    for (int i=0;i<ks.nitems;i++) {
-        if (res.in_sack[i]) {
-        //printf("%i ", i);
+    Knapsack ks = parse_file(argv[1]);
+    if (VERBOSE) {
+        printf("Items: %d  Capacity: %d\n", ks.nitems, ks.capacity);
+        for (int i=0;i<ks.nitems;i++) {
+            printf("item %d: weight %d, value: %d, relweight: %0.2f\n", i, ks.items[i].weight, ks.items[i].value, ks.items[i].relweight);
         }
     }
+    Result res = DYNAMIC? dynprog(ks) : branch_bound(ks);
+    if (VERBOSE) printf("Linear Relaxation: %0.2f\n", ks.relaxation);
+    printf("%d 1\n", res.best_value);
+    for (int i=0;i<ks.nitems;i++) {
+        printf("%d ", res.in_sack[i]);
+    }
     printf("\n");
-    char *errck = checkscore(res, ks) ? "Passed" : "Failed";
-    printf("Check sum: %s\n", errck);
+    if (VERBOSE) {
+        char *errck = checkscore(res, ks) ? "Passed" : "Failed";
+        printf("Check sum: %s\n", errck);
+    }
     return 0;
 }
