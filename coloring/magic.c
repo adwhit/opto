@@ -1,10 +1,11 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-#define SIDELEN 5
+#define SIDELEN 3
 #define NITEMS (SIDELEN * SIDELEN)
 #define TARGET (SIDELEN * (NITEMS +1)/2)
-int count = 0;
+int itercount = 0;
+int magiccount = 0;
 
 typedef enum {false, true} bool;
 
@@ -107,39 +108,43 @@ int takeupper(int ind, Square *square) {
     return -1;
 }
 
-int takelower(int ind, Square *square) {
+int take_n_lowest(int ind, int n, Square *square) {
+    //use zero indexing
     bool *possvals = square->possvalarr[ind].possvals;
     for (int i=0;i<NITEMS;i++) {
         //printf("sqr %d ix %d val %d\n",ind, i, possvals[i]);
-        if (possvals[i]) { return square->valset[i]; }
+        if (possvals[i]) { 
+            if (!n) return square->valset[i]; 
+            n--;
+        }
     }
     return -1;
 }
 
-Square deepcopy(Square *square) {
+Square deepcopy(Square square) {
     Square newsquare;
-    newsquare.valset = square->valset; // no need to deep copy, make sure you don't free
+    newsquare.valset = square.valset; // no need to deep copy, make sure you don't free
     newsquare.possvalarr = malloc(NITEMS* sizeof(PossVals));
     newsquare.board = malloc(NITEMS * sizeof(int));
     for (int i=0;i<NITEMS;i++) {
-        newsquare.board[i] = square->board[i];
+        newsquare.board[i] = square.board[i];
         bool *tmp = malloc(NITEMS * sizeof(int));
         for (int j=0;j<NITEMS;j++){ //init to true
-            tmp[j] = square->possvalarr[i].possvals[j];
+            tmp[j] = square.possvalarr[i].possvals[j];
         }
-        PossVals newpv = {tmp, square->possvalarr[i].tcount};
+        PossVals newpv = {tmp, square.possvalarr[i].tcount};
         newsquare.possvalarr[i] = newpv;
     }
     return newsquare;
 }
 
-bool group_is_feasible(int arr[SIDELEN], Square *square) {
+bool group_is_feasible(int arr[SIDELEN], Square square) {
     int uppersum = 0;
     int lowersum = 0;
     for (int i=0;i<SIDELEN;i++) {
         //printf("arr[%d] = %d\n", i, arr[i]);
-        int upval = takeupper(arr[i], square);
-        int lowval = takelower(arr[i], square);
+        int upval = takeupper(arr[i], &square);
+        int lowval = take_n_lowest(arr[i],0, &square);
         //printf("ind %d lowval %d upval %d\n", i, lowval, upval);
         if (upval == -1 || lowval == -1) {
             return false;
@@ -151,7 +156,20 @@ bool group_is_feasible(int arr[SIDELEN], Square *square) {
     return uppersum >= TARGET && lowersum <= TARGET;
 }
 
-bool check_and_constrain(Square *square) {
+bool enforce_ordering(int *board) {
+    int tl = board[0];
+    int tr = board[SIDELEN-1];
+    int bl = board[NITEMS-SIDELEN];
+    int br = board[NITEMS-1];
+    if (br != -1 && br < tl) return false;
+    if (bl != -1 && (bl < tr || bl < tl)) return false;
+    if (tr != -1 && tr < tl) return false;
+    return true;
+}
+
+bool check_and_constrain(Square square) {
+    //set ordering constraints
+    if (!enforce_ordering(square.board)) return false;
     int rowind[SIDELEN];
     int colind[SIDELEN];
     int diagindul[SIDELEN];
@@ -179,65 +197,24 @@ int val2index(int val, int *valset) {
     return -1;
 }
 
-int *ind2col(int ind) {
-    int *col = malloc(SIDELEN * sizeof(int));
-    int coln = ind % SIDELEN;
-    for (int i=0;i<SIDELEN;i++) 
-        col[i] = coln + i*SIDELEN;
-    return col;
-}
-
-int *ind2row(int ind) {
-    int *row = malloc(SIDELEN * sizeof(int));
-    int rown = ind / SIDELEN;
-    for (int i=0;i<SIDELEN;i++) 
-        row[i] = rown*SIDELEN + i;
-    return row;
-}
-
-int *diagul(int ind) {
-    int *diagindul = malloc(SIDELEN * sizeof(int));
-    for (int i=0;i<SIDELEN;i++)
-        diagindul[i] = SIDELEN * (i+1);
-    return diagindul;
-}
-
-int *diagur(int ind) {
-    int *diagindur = malloc(SIDELEN * sizeof(int));
-    for (int i=0;i<SIDELEN;i++)
-        diagindur[i] = (SIDELEN-1) + SIDELEN -1;
-    
-    return diagindur;
-}
-
-bool ondiagonal_ul(int ind) {
-    if (ind % SIDELEN == ind / SIDELEN)
-        return true;
-    return false;
-}
-
-bool ondiagonal_ur(int ind) {
-    if (ind % SIDELEN == (ind / SIDELEN) + SIDELEN - 1)
-        return true;
-    return false;
-}
-
-void set_value(int boardind, int val, Square *square) {
+bool set_value_and_propagate(int boardind, int val, Square square) {
     // index lookup
-    int valind = val2index(val, square->valset);
+    int valind = val2index(val, square.valset);
     //printf("Setting index %d to value %d (value index %d)\n", boardind,val,valind);
     // set alternative to false
     for (int i=0;i<NITEMS;i++) {
-        if (i != valind && square->possvalarr[boardind].possvals[i]) {
-            square->possvalarr[boardind].possvals[i] = false;
-            square->possvalarr[boardind].tcount--;
+        if (i != valind && square.possvalarr[boardind].possvals[i]) {
+            square.possvalarr[boardind].possvals[i] = false;
+            square.possvalarr[boardind].tcount--;
         }
-        if (i!=boardind && square->possvalarr[i].possvals[valind]) {
-            square->possvalarr[i].possvals[valind] = false;
-            square->possvalarr[i].tcount--;
+        if (i!=boardind && square.possvalarr[i].possvals[valind]) {
+            square.possvalarr[i].possvals[valind] = false;
+            square.possvalarr[i].tcount--;
+            if (square.possvalarr[i].tcount == 0) return false;
         }
     }
-    square->board[boardind] = val;
+    square.board[boardind] = val;
+    return check_and_constrain(square);
 }
 
 int cmp(const void *v1, const void *v2) {
@@ -263,42 +240,47 @@ int *find_most_constrained(PossVals *possvalarr) {
     return sortorder(tcounts);
 }
 
-Result make_magic(Square square, int nplaced) {
-    // recursively solve
-    //print_possvalarr(square->possvalarr);
-    //print_board(square.board);
-    count += 1;
-    //printf("Count: %d\n", count);
-    if (!check_and_constrain(&square)) {
-        Result reslose = {false, NULL};
-        return reslose;
+void make_magic(int next_index, int next_value, Square square, int nplaced) {
+    itercount += 1;
+    //printf("Count: %d\n", itercount);
+    if (!set_value_and_propagate(next_index, next_value, square)) {
+        free_square(square);
+        return;
     } else if (nplaced == NITEMS) {
         //win!
-        Result reswin = {true, square};
-        return reswin;
+        //print_board(res.square.board);
+        magiccount++;
+        printf("Magic count: %d\n", magiccount);
+        free_square(square);
+        return;
     }
+    //print_possvalarr(square.possvalarr);
+    //print_board(square.board);
     int *order_difficulty = find_most_constrained(square.possvalarr);
+    //for (int i=0;i<NITEMS;i++) printf("ind %i order: %d\n", i, order_difficulty[i]);
     for (int i=0;i<NITEMS-nplaced;i++) {
-        Square s2 = deepcopy(&square);
+        //next value
         int next_index = order_difficulty[i];
-        while (s2.board[next_index] != -1) next_index = order_difficulty[++i];     //hack to allow it to finish when nplaced = 8
-        set_value(next_index, takelower(next_index, &s2), &s2);
-        Result res = make_magic(s2, nplaced+1);
-        if (res.success) {
-            print_board(res.square.board);
-            //return res;
-        } else {
-            free_square(s2);
+        while (square.board[next_index] != -1) {
+            i++; 
+            if (i>=NITEMS) return;
+            //printf("i: %d \n", i);
+            next_index = order_difficulty[i];     //hack to allow it to finish when nplaced = 8
+        }
+        int next_value = NITEMS + 1;
+        int nthitem = 0;
+        while (next_value != -1) {
+            next_value = take_n_lowest(next_index, nthitem, &square);
+            nthitem++;
+            make_magic(next_index, next_value, deepcopy(square), nplaced+1);
         }
     }
-    Result res = {false, NULL};
-    return res;
+    free_square(square);
+    return;
 }
 
 int main(int argc, char *argv[]) {
     Square square = initsquare(SIDELEN);
-    Result res = make_magic(square, 0);
-    if (res.success)
-        print_board(res.square.board);
+    make_magic(0,1,square, 8);
     return 0;
 }
