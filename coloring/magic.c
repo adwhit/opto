@@ -1,23 +1,34 @@
-// Don't really know how to do this so just hack away and see where I get to
-
 #include <stdlib.h>
 #include <stdio.h>
 
-static const int SIDELEN = 5;
+#define SIDELEN 5
+#define NITEMS (SIDELEN * SIDELEN)
+#define TARGET (SIDELEN * (NITEMS +1)/2)
 int count = 0;
 
 typedef enum {false, true} bool;
 
+ typedef struct PossVals {
+     bool *possvals;
+     int tcount;
+ } PossVals;
+
 typedef struct Square {
     int *valset;
-    bool **possvalarr;
+    PossVals *possvalarr;
     int *board;
 } Square;
 
+
 typedef struct Result {
     bool success;
-    Square *square;
+    Square square;
 } Result;
+
+struct OrdSort {
+    int val;
+    int ind;
+};
 
 void print_board(int *board) {
     for (int i=0;i<SIDELEN;i++) {
@@ -33,12 +44,12 @@ void print_board(int *board) {
     printf("\n");
 }
 
-void print_possvalarr(bool **possvalarr) {
+void print_possvalarr(PossVals *possvalarr) {
     for (int i=0;i<SIDELEN;i++) {
         for (int j=0;j<SIDELEN;j++) {
             printf("r%d c%d: ", i, j);
-            for (int k=0;k<SIDELEN*SIDELEN;k++) {
-                if (possvalarr[SIDELEN*i + j][k]) {
+            for (int k=0;k<NITEMS;k++) {
+                if (possvalarr[SIDELEN*i + j].possvals[k]) {
                     printf(". ");
                 } else {
                     printf("X ");
@@ -52,7 +63,7 @@ void print_possvalarr(bool **possvalarr) {
 
 void print_valset(int *valset) {
     printf("Value set: ");
-    for (int i=0;i<SIDELEN*SIDELEN;i++) {
+    for (int i=0;i<NITEMS;i++) {
         printf("%d", valset[i]);
     }
         printf("\n");
@@ -60,26 +71,27 @@ void print_valset(int *valset) {
 
 Square initsquare() {
     Square square;
-    square.valset = malloc(SIDELEN*SIDELEN * sizeof(int));
-    square.possvalarr = malloc(SIDELEN * SIDELEN * sizeof(bool *));
-    square.board = malloc(SIDELEN*SIDELEN * sizeof(int));
-    for (int i=0;i<SIDELEN*SIDELEN;i++) {
+    square.valset = malloc(NITEMS*sizeof(int));
+    square.possvalarr = malloc(NITEMS*sizeof(PossVals));
+    square.board = malloc(NITEMS*sizeof(int));
+    for (int i=0;i<NITEMS;i++) {
         square.valset[i] = i+1;
     }
-    for (int i=0;i<SIDELEN*SIDELEN;i++) {
+    for (int i=0;i<NITEMS;i++) {
         square.board[i] = -1;
-        bool *tmp = malloc(SIDELEN * SIDELEN * sizeof(int));
-        for (int j=0;j<SIDELEN*SIDELEN;j++){ //init to true
+        bool *tmp = malloc(NITEMS*sizeof(int));
+        for (int j=0;j<NITEMS;j++){ //init to true
             tmp[j] = true;
         }
-        square.possvalarr[i] = tmp;
+        PossVals poss = {tmp, NITEMS };
+        square.possvalarr[i] = poss;
     }
     return square;
 }
 
 void free_square(Square square) {
-    for (int i=0;i<SIDELEN*SIDELEN;i++) {
-        free(square.possvalarr[i]);
+    for (int i=0;i<NITEMS;i++) {
+        free(square.possvalarr[i].possvals);
     }
     free(square.possvalarr);
     free(square.board);
@@ -87,8 +99,8 @@ void free_square(Square square) {
 
 
 int takeupper(int ind, Square *square) {
-    bool *possvals = square->possvalarr[ind];
-    for (int i=SIDELEN*SIDELEN-1;i>=0;i--) {
+    bool *possvals = square->possvalarr[ind].possvals;
+    for (int i=NITEMS-1;i>=0;i--) {
         /*printf("sqr %d ix %d val %d\n",ind, i, possvals[i]);*/
         if (possvals[i]) { return square->valset[i]; }
     }
@@ -96,8 +108,8 @@ int takeupper(int ind, Square *square) {
 }
 
 int takelower(int ind, Square *square) {
-    bool *possvals = square->possvalarr[ind];
-    for (int i=0;i<SIDELEN*SIDELEN;i++) {
+    bool *possvals = square->possvalarr[ind].possvals;
+    for (int i=0;i<NITEMS;i++) {
         //printf("sqr %d ix %d val %d\n",ind, i, possvals[i]);
         if (possvals[i]) { return square->valset[i]; }
     }
@@ -107,16 +119,16 @@ int takelower(int ind, Square *square) {
 Square deepcopy(Square *square) {
     Square newsquare;
     newsquare.valset = square->valset; // no need to deep copy, make sure you don't free
-    newsquare.possvalarr = malloc(SIDELEN * SIDELEN * sizeof(bool *));
-    newsquare.board = malloc(SIDELEN * SIDELEN * sizeof(int));
-    for (int i=0;i<SIDELEN*SIDELEN;i++) {
-        newsquare.valset[i] = square->valset[i];
+    newsquare.possvalarr = malloc(NITEMS* sizeof(PossVals));
+    newsquare.board = malloc(NITEMS * sizeof(int));
+    for (int i=0;i<NITEMS;i++) {
         newsquare.board[i] = square->board[i];
-        bool *tmp = malloc(SIDELEN*SIDELEN * sizeof(int));
-        for (int j=0;j<SIDELEN*SIDELEN;j++){ //init to true
-            tmp[j] = square->possvalarr[i][j];
+        bool *tmp = malloc(NITEMS * sizeof(int));
+        for (int j=0;j<NITEMS;j++){ //init to true
+            tmp[j] = square->possvalarr[i].possvals[j];
         }
-        newsquare.possvalarr[i] = tmp;
+        PossVals newpv = {tmp, square->possvalarr[i].tcount};
+        newsquare.possvalarr[i] = newpv;
     }
     return newsquare;
 }
@@ -136,11 +148,10 @@ bool group_is_feasible(int arr[SIDELEN], Square *square) {
         lowersum += lowval;
     }
     //printf("lowersum %d uppersum %d\n", lowersum, uppersum );
-    int TARGET  = SIDELEN*((SIDELEN*SIDELEN)+1)/2;
     return uppersum >= TARGET && lowersum <= TARGET;
 }
 
-bool check_feasible(Square *square) {
+bool check_and_constrain(Square *square) {
     int rowind[SIDELEN];
     int colind[SIDELEN];
     int diagindul[SIDELEN];
@@ -161,7 +172,7 @@ bool check_feasible(Square *square) {
 }
 
 int val2index(int val, int *valset) {
-    for (int i=0;i<SIDELEN*SIDELEN;i++) {
+    for (int i=0;i<NITEMS;i++) {
         if (val == valset[i])
             return i;
         }
@@ -216,91 +227,78 @@ void set_value(int boardind, int val, Square *square) {
     int valind = val2index(val, square->valset);
     //printf("Setting index %d to value %d (value index %d)\n", boardind,val,valind);
     // set alternative to false
-    for (int i=0;i<SIDELEN*SIDELEN;i++) {
-        if (i != valind)
-            square->possvalarr[boardind][i] = false;
-    }
-    for (int j=0;j<SIDELEN*SIDELEN;j++) {
-        if (j!=boardind)
-            square->possvalarr[j][valind] = false;
+    for (int i=0;i<NITEMS;i++) {
+        if (i != valind && square->possvalarr[boardind].possvals[i]) {
+            square->possvalarr[boardind].possvals[i] = false;
+            square->possvalarr[boardind].tcount--;
+        }
+        if (i!=boardind && square->possvalarr[i].possvals[valind]) {
+            square->possvalarr[i].possvals[valind] = false;
+            square->possvalarr[i].tcount--;
+        }
     }
     square->board[boardind] = val;
 }
 
-Result make_magic(Square *square, int nplaced) {
+int cmp(const void *v1, const void *v2) {
+    const int i1 = **(const int **)v1;
+    const int i2 = **(const int **)v2;
+    if (i1 == 1) return 1;
+    if (i2 == 1) return -1;
+    return i1<i2?-1:(i1>i2);
+}
+
+int *sortorder(int array[NITEMS]) {
+    int *parray[NITEMS],i;
+    int *position = malloc(NITEMS * sizeof(int));
+    for(i = 0; i < NITEMS;i++) parray[i] = &array[i];
+    qsort(parray,NITEMS, sizeof *parray, cmp);
+    for(i = 0;i < NITEMS;i++) position[i] = (parray[i] - array);
+    return position;
+}
+
+int *find_most_constrained(PossVals *possvalarr) {
+    int tcounts[NITEMS];
+    for (int i=0;i<NITEMS;i++) (tcounts[i] = possvalarr[i].tcount);
+    return sortorder(tcounts);
+}
+
+Result make_magic(Square square, int nplaced) {
     // recursively solve
     //print_possvalarr(square->possvalarr);
-    //print_board(square->board);
+    //print_board(square.board);
     count += 1;
-    printf("Count: %d\n", count);
-    if (!check_feasible(square)) {
+    //printf("Count: %d\n", count);
+    if (!check_and_constrain(&square)) {
         Result reslose = {false, NULL};
         return reslose;
-    } else if (nplaced == SIDELEN*SIDELEN) {
+    } else if (nplaced == NITEMS) {
         //win!
         Result reswin = {true, square};
         return reswin;
     }
-    for (int i=0;i<SIDELEN*SIDELEN;i++) {
-        if (square->board[i] == -1) {
-            Square s2 = deepcopy(square);
-            set_value(i, takelower(i, &s2), &s2);
-            Result res = make_magic(&s2, nplaced+1);
-            if (res.success) {
-                return res;
-            } else {
-                free_square(s2);
-            }
+    int *order_difficulty = find_most_constrained(square.possvalarr);
+    for (int i=0;i<NITEMS-nplaced;i++) {
+        Square s2 = deepcopy(&square);
+        int next_index = order_difficulty[i];
+        while (s2.board[next_index] != -1) next_index = order_difficulty[++i];     //hack to allow it to finish when nplaced = 8
+        set_value(next_index, takelower(next_index, &s2), &s2);
+        Result res = make_magic(s2, nplaced+1);
+        if (res.success) {
+            print_board(res.square.board);
+            //return res;
+        } else {
+            free_square(s2);
         }
     }
     Result res = {false, NULL};
     return res;
 }
 
-
-/*void set_value(int boardind, int val, Square *square) {*/
-    /*// index lookup*/
-    /*int valind = val2index(val, square->valset);*/
-    /*// set alternative to false*/
-    /*for (int i=0;i<SIDELEN;i++) {*/
-        /*if (i != valind)*/
-            /*square->possvalarr[boardind][i] = false;*/
-    /*}*/
-    /*// set other board members in col, row to false*/
-    /*int *rowinds = ind2row(boardind);*/
-    /*int *colinds = ind2col(boardind);*/
-    /*for (int j=0;j<SIDELEN;j++) {*/
-        /*int rind = rowinds[j];*/
-        /*int cind = colinds[j];*/
-        /*if (rind != boardind)*/
-            /*square->possvalarr[rind][valind] = false;*/
-        /*if (cind != boardind)*/
-            /*square->possvalarr[cind][valind] = false;*/
-    /*}*/
-
-    /*// do same for diagonals*/
-    /*if (ondiagonal_ul(boardind)) {*/
-        /*int *diagind_ul = diagul(boardind);*/
-        /*for (int i=0;i<SIDELEN;i++) {*/
-            /*if (diagind_ul[i]!=boardind)*/
-                /*square->possvalarr[i][valind] = false;*/
-        /*}*/
-    /*}*/
-    /*if (ondiagonal_ur(boardind)) {*/
-        /*int *diagind_ur = diagur(boardind);*/
-        /*for (int i=0;i<SIDELEN;i++) {*/
-            /*if (diagind_ur[i]!=boardind)*/
-                /*square->possvalarr[i][valind] = false;*/
-        /*}*/
-    /*}*/
-    /*square->board[boardind] = val;*/
-/*}*/
-
-
 int main(int argc, char *argv[]) {
     Square square = initsquare(SIDELEN);
-    Result res = make_magic(&square, 0);
+    Result res = make_magic(square, 0);
     if (res.success)
-        print_board(res.square->board);
+        print_board(res.square.board);
     return 0;
 }
