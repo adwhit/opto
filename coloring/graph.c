@@ -169,6 +169,9 @@ void solve(int nitems, int *n1ind, int *n2ind) {
     int ncolours = 2;
     bool success = false;
     while (!success) {
+        // Is it a good idea to reconstruct the graph just to update
+        // the number of possible colors? Maybe you can do a DFS to update
+        // to update the value
         Graph graph = construct_graph(ncolours, nitems, n1ind, n2ind);
         success = start_solver(&graph);
         ncolours++;
