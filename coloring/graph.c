@@ -73,6 +73,11 @@ int *colour_freq_sort(int *array, int ncolours) {
 }
 
 int *find_rarest_colours(Graph *g) {
+    /*
+        This is just an idea. But rather than calculate the rarest possible
+        color for the whole graph, calculate the rarest possible color for
+        that region or just around the edges.
+    */
     int *counts = calloc(g->ncolours, sizeof(int));
     for (int i=0; i<g->ncolours; i++) {
         for (int j=0; j<g->ncolours; j++) { 
