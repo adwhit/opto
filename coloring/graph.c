@@ -132,8 +132,8 @@ bool set_and_propagate(int next_node_ix, int next_node_colour, Graph *g) {
 
 void choose_next(int *next_node, int *next_colour, Graph *g) {
     // Why are you calculating the most_constrained again here? Can't you use
-    // the one you already calculated and pass it into the method? The amount of
-    // edges in the graph can't change.
+    // the one you already calculated and pass it into the method? or keep this global
+    // The amount of edges in the graph can't change.
 
     /*
         But calculaing the rarest colour makes sense, because that can 
@@ -220,6 +220,12 @@ void print_links(Graph *g) {
 }
 
 int main() {
+    /*
+        We didn't see any backtracking in the code (but maybe its there and we 
+        couldn't find it. Then ignore this comment.) But if there isn't, then
+        maybe you should try the next rarestcolor on previous nodes before 
+        trying to increase the amount of possible colors.
+    */
     NNODES = 10;
     int n1ind[13] = {0,1,1,1,3,5,6,6,5,9,9,9,9};
     int n2ind[13] = {1,2,3,4,4,6,7,8,4,1,2,3,4};
