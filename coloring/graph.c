@@ -33,13 +33,6 @@ typedef struct {
 void print_colours(Graph *g);
 void print_colour_state(Graph *g);
 
-void print_arr(int *arr, int len) {
-    for (int i=0;i<len;i++) {
-        printf("%d ",arr[i]);
-    }
-    printf("\n");
-}
-
 int cmp_node_nlinks(const void *v1, const void *v2) {
     const Node *i1 = *(const Node **)v1;
     const Node *i2 = *(const Node **)v2;
@@ -134,7 +127,6 @@ bool set_and_propagate(int next_node_ix, int next_node_colour, Graph *g) {
         }
     }
     print_colour_state(g);
-    print_colours(g);
     return true;
 }
 
@@ -145,10 +137,6 @@ void choose_next(int *next_node, int *next_colour, Graph *g) {
     int colourind = 0;
     // make sure node hasn't already been set
     while (g->node_colours[constrained_order[nodeind]] != -1) nodeind ++;
-    /*printf("nodeindex %d\n",nodeind);*/
-    /*printf("colindex %d\n",colourind);*/
-    /*printf("rarestcolour %d\n",rarest_colours[colourind]);*/
-    /*printf("is feasible %d\n",g->nodes[nodeind].posscolours[rarest_colours[colourind]]);*/
     // make sure node colour is possible
     while (!g->nodes[constrained_order[nodeind]].posscolours[rarest_colours[colourind]]) colourind++;
     *next_node = constrained_order[nodeind];
@@ -177,7 +165,7 @@ bool start_solver(Graph *g) {
 }
 
 void solve(int nitems, int *n1ind, int *n2ind) {
-    // XXX got to handle frees
+    // TODO: free graph on failure
     int ncolours = 2;
     bool success = false;
     while (!success) {
