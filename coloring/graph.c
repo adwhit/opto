@@ -131,6 +131,14 @@ bool set_and_propagate(int next_node_ix, int next_node_colour, Graph *g) {
 }
 
 void choose_next(int *next_node, int *next_colour, Graph *g) {
+    // Why are you calculating the most_constrained again here? Can't you use
+    // the one you already calculated and pass it into the method? The amount of
+    // edges in the graph can't change.
+
+    /*
+        But calculaing the rarest colour makes sense, because that can 
+        consistently change depending on the color you assign to the node.
+    */
     int *constrained_order = find_most_constrained(g);
     int *rarest_colours = find_rarest_colours(g);
     int nodeind = 0;
