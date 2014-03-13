@@ -74,8 +74,8 @@ int *colour_freq_sort(int *array, int ncolours) {
 
 int *find_rarest_colours(Graph *g) {
     int *counts = calloc(g->ncolours, sizeof(int));
-    for (int i=0;i<g->ncolours;i++) {
-        for (int j=0;j<g->ncolours;j++) {
+    for (int i=0; i<g->ncolours; i++) {
+        for (int j=0; j<g->ncolours; j++) { 
             if (g->nodes[i].posscolours[j]) counts[j]++;
         }
     }
