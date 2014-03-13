@@ -73,9 +73,14 @@ int *colour_freq_sort(int *array, int ncolours) {
 }
 
 int *find_rarest_colours(Graph *g) {
+    /*
+        This is just an idea. But rather than calculate the rarest possible
+        color for the whole graph, calculate the rarest possible color for
+        that region or just around the edges.
+    */
     int *counts = calloc(g->ncolours, sizeof(int));
-    for (int i=0;i<g->ncolours;i++) {
-        for (int j=0;j<g->ncolours;j++) {
+    for (int i=0; i<g->ncolours; i++) {
+        for (int j=0; j<g->ncolours; j++) { 
             if (g->nodes[i].posscolours[j]) counts[j]++;
         }
     }
@@ -131,6 +136,14 @@ bool set_and_propagate(int next_node_ix, int next_node_colour, Graph *g) {
 }
 
 void choose_next(int *next_node, int *next_colour, Graph *g) {
+    // Why are you calculating the most_constrained again here? Can't you use
+    // the one you already calculated and pass it into the method? or keep this global
+    // The amount of edges in the graph can't change.
+
+    /*
+        But calculaing the rarest colour makes sense, because that can 
+        consistently change depending on the color you assign to the node.
+    */
     int *constrained_order = find_most_constrained(g);
     int *rarest_colours = find_rarest_colours(g);
     int nodeind = 0;
@@ -169,6 +182,9 @@ void solve(int nitems, int *n1ind, int *n2ind) {
     int ncolours = 2;
     bool success = false;
     while (!success) {
+        // Is it a good idea to reconstruct the graph just to update
+        // the number of possible colors? Maybe you can do a DFS to update
+        // to update the value
         Graph graph = construct_graph(ncolours, nitems, n1ind, n2ind);
         success = start_solver(&graph);
         ncolours++;
@@ -209,6 +225,12 @@ void print_links(Graph *g) {
 }
 
 int main() {
+    /*
+        We didn't see any backtracking in the code (but maybe its there and we 
+        couldn't find it. Then ignore this comment.) But if there isn't, then
+        maybe you should try the next rarestcolor on previous nodes before 
+        trying to increase the amount of possible colors.
+    */
     NNODES = 10;
     int n1ind[13] = {0,1,1,1,3,5,6,6,5,9,9,9,9};
     int n2ind[13] = {1,2,3,4,4,6,7,8,4,1,2,3,4};
