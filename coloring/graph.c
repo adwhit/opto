@@ -28,6 +28,7 @@ typedef struct {
     int ncolours;
     int *node_colours;
     Node *nodes;
+    int **colourstate;
 } Graph;
 
 typedef struct {
@@ -39,11 +40,13 @@ int NEDGES = 0;
 
 bool VERBOSE = false;
 bool DEBUG = false;
-bool PRINTOUT = false;
+bool DETAILEDRES = false;
+bool PRINTSTATE = false;
 
 void print_colours(Graph *g);
 void print_colour_state(Graph *g);
 void print_output(Graph *g);
+void save_colourstate(int iter, Graph *g);
 
 int cmp_node_nlinks(const void *v1, const void *v2) {
     const Node *i1 = *(const Node **)v1;
@@ -111,9 +114,14 @@ int *find_rarest_colours(Graph *g) {
 
 Graph construct_graph(int ncolours, int *n1inds,int *n2inds) {
     //initialise graph and nodes. Possible cffi entry point
-    Graph g = {ncolours, calloc(NNODES, sizeof(int)), calloc(NNODES,sizeof(Node))};
+    Graph g = {
+        ncolours, 
+        calloc(NNODES, sizeof(int)), 
+        calloc(NNODES,sizeof(Node)),
+        malloc(NNODES * sizeof(int *))};
     for (int i=0;i<NNODES;i++) {
         g.node_colours[i] = -1;
+        g.colourstate[i] = malloc(NNODES * sizeof(int));
         Node n = { i, 0, g.ncolours,
             calloc(NNODES,sizeof(bool)),
             calloc(NNODES,sizeof(Node *))
@@ -178,9 +186,10 @@ void choose_next(int *next_node, int *next_colour, Graph *g) {
 
 bool solver(int next_node_ix, int next_node_colour, Graph *g, int ncoloured) {
     bool success = set_and_propagate(next_node_ix, next_node_colour, g);
+    save_colourstate(ncoloured, g);
     if (VERBOSE) print_colour_state(g);
     if (!success) return false;
-    else if (ncoloured == NNODES) return true;
+    if (ncoloured == NNODES) return true;
     else {
         int next_node;
         int next_colour;
@@ -203,26 +212,23 @@ bool start_solver(Graph *g) {
 void solve(int *n1ind, int *n2ind) {
     // TODO: free graph on failure
     int ncolours = 2;
-    bool success = false;
+    bool success;
     Graph graph;
-    while (!success) {
+    while (1) {
         graph = construct_graph(ncolours, n1ind, n2ind);
         success = start_solver(&graph);
         if (success) break;
         free_graph(&graph);
         ncolours++;
     }
-    if (PRINTOUT) print_colour_state(&graph);
+    if (DETAILEDRES) print_colour_state(&graph);
     print_output(&graph);
 }
 
-void print_colours(Graph *g) {
-    printf("Colours: ");
-    for (int i=0;i<NNODES;i++) {
-        if (g->node_colours[i]==-1) printf(". ");
-        else printf("%d ", g->node_colours[i]);
+void save_colourstate(int ncoloured, Graph *g) {
+    for (int j=0;j<NNODES;j++) {
+        g->colourstate[ncoloured-1][j] = g->node_colours[j];
     }
-    puts("");
 }
 
 void print_colour_state(Graph *g) {
@@ -249,9 +255,18 @@ void print_links(Graph *g) {
 }
 
 void print_output(Graph *g) {
-    printf("%d 0\n", g->ncolours);
-    for (int i=0;i<NNODES;i++) printf("%d ",g->node_colours[i]);
-    puts("");
+    if (PRINTSTATE) {
+        for (int i=0;i<NNODES;i++) {
+            for (int j=0;j<NNODES;j++) {
+                printf("%02d ", g->colourstate[i][j]);
+            }
+            puts("");
+        }
+    } else {
+        printf("%d 0\n", g->ncolours);
+        for (int i=0;i<NNODES;i++) printf("%d ",g->node_colours[i]);
+        puts("");
+    }
 }
 
 struct Tuple parse_file(char *fpath) {
@@ -279,7 +294,8 @@ int main(int argc, char *argv[]) {
     for (int i=1;i<argc;i++) {
         if (strcmp(argv[i],"-v") == 0) VERBOSE = true;
         if (strcmp(argv[i],"-d") == 0) DEBUG = true;
-        if (strcmp(argv[i],"-p") == 0) PRINTOUT = true;
+        if (strcmp(argv[i],"-r") == 0) DETAILEDRES = true;
+        if (strcmp(argv[i],"-s") == 0) PRINTSTATE = true;
     }
     struct Tuple tup = parse_file(argv[1]);
     solve(tup.arr1, tup.arr2);
