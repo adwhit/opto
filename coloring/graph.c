@@ -49,6 +49,8 @@ void print_colour_state(Graph *g);
 void print_output(Graph *g);
 void save_colourstate(int iter, Graph *g);
 int nposscolours(Node *n);
+bool *colours_available(Node *n, int from_node_index, int depth);
+bool can_change_colour(Node *n, int from_node, int depth);
 
 int cmp_node_nneighbours(const void *v1, const void *v2) {
     const Node *i1 = *(const Node **)v1;
@@ -158,7 +160,23 @@ void free_graph(Graph *g) {
     free(g->nodes);
 };
 
-bool can_change_colour(Node *n, Node *from_node, Graph *g, int depth) {
+bool *colours_available(Node *n, int from_node_index, int depth) {
+    bool *colour_available = malloc(NCOLOURS * sizeof(int));
+    //set default to true
+    for (int i=0;i<NCOLOURS;i++) colour_available[i] = true;
+    //set present colour to false
+    if (n->colour != -1) colour_available[n->colour] = false;
+    for (int i=0;i<n->nneighbours;i++) {
+        // make sure to exlude from_node from checks
+        Node *nodetocheck = n->neighbours[i];
+        if (nodetocheck->index != from_node_index) {
+            colour_available[nodetocheck->colour] =
+                can_change_colour(nodetocheck, n->index, depth +1);
+        }
+    }
+}
+
+bool can_change_colour(Node *n, int from_node_index, int depth) {
     //see if a node can change colour immediately
     if (nposscolours(n) > 1) {
         for (int i=0;i<NCOLOURS;i++) {
@@ -168,21 +186,15 @@ bool can_change_colour(Node *n, Node *from_node, Graph *g, int depth) {
         }
         return true;
     }
-    if (depth >= g->maxsearchdepth) return false;
+    if (depth <= 0) {
+        n->next_colour = -1;
+        return false;
+    }
     //see if children can change
     //Assume all colours are available except node's current colour
-    bool *colour_unavailable = calloc(NCOLOURS, sizeof(int));
-    if (n->colour != -1) colour_unavailable[n->colour] = true;
-    for (int i=0;i<n->nneighbours;i++) {
-        // make sure to exlude from_node from checks
-        Node *nodetocheck = n->neighbours[i];
-        if (nodetocheck->index != from_node->index) {
-            colour_unavailable[nodetocheck->colour] = !
-                can_change_colour(nodetocheck, n, g, depth +1);
-        }
-    }
+    bool *available_colours = colours_available(n, from_node_index, depth-1);
     for (int i=0;i<NCOLOURS;i++) {
-        if (!colour_unavailable[i]) {
+        if (available_colours[i]) {
             n->next_colour = i;
             return true;
         }
@@ -219,17 +231,19 @@ bool change_and_propagate(Node *n, Graph *g) {
     return true;
 }
 
-//bool ask_for_changes(Node *request_node, Graph g*) {
-
-
 void set_and_propagate(Node *next_node, int next_node_colour, Graph *g) {
-    //XXX now needs to check that it can be set - no longer guaranteed.
-    if (next_node_colour == -1) {  // no free colours 
-        //can_change_colour(next_node,
-        //increase ncolours
-        NCOLOURS++;
-        if (VERBOSE) printf("Incresing ncolours to %d\n", NCOLOURS);
-        next_node_colour = NCOLOURS - 1;
+    if (next_node_colour == -1) {  
+        // no free colours - try to change surrounding nodes
+        if (can_change_colour(next_node, -1, g->maxsearchdepth)) {
+            if (VERBOSE) printf("Propagating change from node %d\n", next_node->index);
+            change_and_propagate(next_node, g);
+            return;
+        } else {
+            //increase ncolours
+            NCOLOURS++;
+            if (VERBOSE) printf("Incresing ncolours to %d\n", NCOLOURS);
+            next_node_colour = NCOLOURS - 1;
+        }
     }
     if (VERBOSE) printf("Setting node %d to colour %d\n", next_node->index, next_node_colour);
     //set
