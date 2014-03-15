@@ -18,10 +18,12 @@ struct Tuple {
 
 struct Node {
     int index;
-    int nlinks;
+    int colour;
+    int next_colour;             //for propagation
+    int nneighbours;
     int nposscolours;
     int *neighbour_colours;
-    Node **links;
+    Node **neighbours;
 };
 
 typedef struct {
@@ -49,24 +51,24 @@ void print_colour_state(Graph *g);
 void print_output(Graph *g);
 void save_colourstate(int iter, Graph *g);
 
-int cmp_node_nlinks(const void *v1, const void *v2) {
+int cmp_node_nneighbours(const void *v1, const void *v2) {
     const Node *i1 = *(const Node **)v1;
     const Node *i2 = *(const Node **)v2;
-    return i1->nlinks > i2->nlinks ? -1 : (i1->nlinks < i2->nlinks);
+    return i1->nneighbours > i2->nneighbours ? -1 : (i1->nneighbours < i2->nneighbours);
 }
 
-int *node_argsort_nlinks(Node *array) {
+int *node_argsort_nneighbours(Node *array) {
     Node **parray = malloc(NNODES * sizeof(Node *));
     int *position = malloc(NNODES * sizeof(int));
     for(int i = 0; i < NNODES; i++) parray[i] = &array[i];
-    qsort(parray, NNODES, sizeof(Node *), cmp_node_nlinks);
+    qsort(parray, NNODES, sizeof(Node *), cmp_node_nneighbours);
     for(int i = 0;i < NNODES;i++) position[i] = (parray[i] - array);
     free(parray);
     return position;
 }
 
 int *find_most_constrained(Graph *g) {
-    int *position = node_argsort_nlinks(g->nodes);
+    int *position = node_argsort_nneighbours(g->nodes);
     /*puts("Node constraint order");*/
     /*for (int i=0;i < NNODES; i++) {*/
         /*printf("index: %d  Rank %d\n", i, position[i]);*/
@@ -123,7 +125,7 @@ Graph construct_graph(int ncolours, int maxsearchdepth, int *n1inds,int *n2inds)
     for (int i=0;i<NNODES;i++) {
         g.node_colours[i] = -1;
         g.colourstate[i] = malloc(NNODES * sizeof(int));
-        Node n = { i, 0, g.ncolours,
+        Node n = { i, -1, -1, 0, g.ncolours,
             calloc(NNODES,sizeof(int)),
             calloc(NNODES,sizeof(Node *))
         };
@@ -134,10 +136,10 @@ Graph construct_graph(int ncolours, int maxsearchdepth, int *n1inds,int *n2inds)
         int n2ind = n2inds[i];
         Node *n1 = &g.nodes[n1ind];
         Node *n2 = &g.nodes[n2ind];
-        n1->links[n1->nlinks] = n2;
-        n2->links[n2->nlinks] = n1;
-        n1->nlinks++;
-        n2->nlinks++;
+        n1->neighbours[n1->nneighbours] = n2;
+        n2->neighbours[n2->nneighbours] = n1;
+        n1->nneighbours++;
+        n2->nneighbours++;
     }
     return g;
 }
@@ -146,7 +148,7 @@ void free_graph(Graph *g) {
     free(g->node_colours);
     for (int i=0;i<NNODES;i++) {
         free(g->nodes[i].neighbour_colours);
-        free(g->nodes[i].links);
+        free(g->nodes[i].neighbours);
     };
     free(g->nodes);
 };
@@ -160,31 +162,66 @@ void increase_ncolours(Graph *g) {
 }
 
 bool can_change_colour(Node *n, int from_node_ix, Graph *g, int depth) {
-    //see if a node can change colour
-    if (n->nposscolours > 1) return true;
+    //see if a node can change colour immediately
+    if (n->nposscolours > 1) {
+        for (int i=0;i<g->ncolours;i++) {
+            if ((n->colour != i) && (n->neighbour_colours[i] == 0)) {
+                n->next_colour = i;
+            }
+        }
+        return true;
+    }
     if (depth >= g->maxsearchdepth) return false;
-    //Assume all colours are available except nodes current colour
+    //see if children can change
+    //Assume all colours are available except node's current colour
     bool *colour_unavailable = calloc(g->ncolours, sizeof(int));
     colour_unavailable[g->node_colours[n->index]] = true;
-    for (int i=0;i<n->nlinks;i++) {
+    for (int i=0;i<n->nneighbours;i++) {
         // make sure to exlude from_node from checks
-        int nodetocheck = n->links[i]->index;
+        int nodetocheck = n->neighbours[i]->index;
         if (nodetocheck != from_node_ix) {
             colour_unavailable[g->node_colours[nodetocheck]] = !can_change_colour;
         }
     }
-    for (int i=0;i<g->ncolours;i++) if (!colour_unavailable[i]) return true;
+    for (int i=0;i<g->ncolours;i++) {
+        if (!colour_unavailable[i]) {
+            n->next_colour = i;
+            return true;
+    }
+    n->next_colour = -1;
     return false;
 }
+
+bool change_and_propagate(Node *n, Graph *g, int depth) {
+    if (n->nposscolours == 1) {
+        //ask further along chain
+        for (int i=0;i<n->nneighbours;i++) {
+            if (n->neighbours[i]->colour == n->next_colour) {
+                change_and_propagate(n->neighbours[i], g, depth+1);
+            }
+        }
+    }
+    if (n->nposscolours != 1) return false;
+    for (int i=0;i<n->nneighbours;i++) {
+        n->neighbours[i]->neighbour_colours[n->next_colour]++;
+        n->neighbours[i]->neighbour_colours[n->colour]--;
+    }
+    n->colour = n->next_colour;
+    n->next_colour = -1;
+    g->node_colours[n->index] = n->colour;
+    return true;
+}
+
 
 void set_and_propagate(int next_node_ix, int next_node_colour, Graph *g) {
     if (VERBOSE) printf("Setting node %d to colour %d\n", next_node_ix, next_node_colour);
     //set
     g->node_colours[next_node_ix] = next_node_colour;
+    g->nodes[next_node_ix].colour = next_node_colour;
     //propagate - remove colour from nearby nodes
     Node node = g->nodes[next_node_ix];
-    for (int j=0;j<node.nlinks;j++) {
-        Node *linkednode = node.links[j];
+    for (int j=0;j<node.nneighbours;j++) {
+        Node *linkednode = node.neighbours[j];
         if (linkednode->neighbour_colours[next_node_colour]==0) {
             linkednode->neighbour_colours[next_node_colour]++;
             linkednode->nposscolours--;
@@ -224,7 +261,6 @@ void solver(int next_node_ix, int next_node_colour, Graph *g, int ncoloured) {
     return;
 }
 
-
 void solve(int *n1ind, int *n2ind) {
     // TODO: free graph on failure
     Graph graph = construct_graph(2, 2, n1ind, n2ind);
@@ -253,12 +289,12 @@ void print_colour_state(Graph *g) {
     }
 }
 
-void print_links(Graph *g) {
+void print_neighbours(Graph *g) {
     for (int i=0;i<NNODES;i++) {
         printf("Node %d: ", i);
         Node n = g->nodes[i];
-        for (int j=0;j<n.nlinks;j++)
-            printf("%d ", n.links[j]->index);
+        for (int j=0;j<n.nneighbours;j++)
+            printf("%d ", n.neighbours[j]->index);
         puts("");
     }
 }
