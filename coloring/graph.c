@@ -12,8 +12,10 @@ typedef enum {false, true} bool;
 typedef struct Node Node;
 
 struct Tuple {
-    int *arr1;
-    int *arr2;
+    int *n1arr;
+    int *n2arr;
+    int nnodes;
+    int nedges;
 };
 
 struct Node {
@@ -23,6 +25,12 @@ struct Node {
     int nneighbours;
     int *neighbour_colours;
     Node **neighbours;
+};
+
+struct Result {
+    int ncolours;
+    int nnodes;
+    int *colours;
 };
 
 typedef struct {
@@ -46,12 +54,14 @@ bool PRINTSTATE = false;
 
 void print_colours(Graph *g);
 void print_colour_state(Graph *g);
-void print_output(Graph *g);
+void print_output(struct Result res);
 void save_colourstate(int iter, Graph *g);
 int nposscolours(Node *n);
 bool *find_available_colours(Node *n, int from_node_index, int depth);
 bool can_change_colour(Node *n, int from_node, int depth);
 bool check_valid(Graph *g);
+void print_state(Graph *g);
+void print_neighbours(Graph *g);
 
 int cmp_node_nneighbours(const void *v1, const void *v2) {
     const Node *i1 = *(const Node **)v1;
@@ -72,20 +82,19 @@ int *node_argsort_nneighbours(Node *array) {
     return position;
 }
 
-int *find_most_constrained(Graph *g) {
+Node *choose_next_node(Graph *g) {
+    //for (int i=0;i<NNODES;i++) {
+    //    if (g->nodes[i].colour == -1) return &g->nodes[i];
+    //}
     int *position = node_argsort_nneighbours(g->nodes);
-    /*puts("Node constraint order");*/
-    /*for (int i=0;i < NNODES; i++) {*/
-        /*printf("index: %d  Rank %d\n", i, position[i]);*/
-    /*}*/
-    return position;
+    return &g->nodes[position[0]];
 }
 
 int cmp_colour_freq(const void *v1, const void *v2) {
     const int i1 = **(const int **)v1;
     const int i2 = **(const int **)v2;
-    if (i1 < i2) return -1;
-    if (i1 > i2) return 1;
+    if (i1 > i2) return -1;
+    if (i1 < i2) return 1;
     return 0;
 }
 
@@ -103,7 +112,6 @@ int *colour_freq_sort(int *array) {
 }
 
 int *find_rarest_colours(Graph *g) {
-    //XXX this will now stackoverflow since some nodes have no possible colours
     int *counts = calloc(NCOLOURS, sizeof(int));
     for (int i=0;i<NNODES;i++) {
         for (int j=0;j<NCOLOURS;j++) {
@@ -154,8 +162,8 @@ Graph construct_graph(int *n1inds,int *n2inds) {
 
 void free_graph(Graph *g) {
     for (int i=0;i<NNODES;i++) {
-        free(g->nodes[i].neighbour_colours);
         free(g->nodes[i].neighbours);
+        free(g->nodes[i].neighbour_colours);
     };
     free(g->nodes);
 };
@@ -197,9 +205,11 @@ bool can_change_colour(Node *n, int from_node_index, int depth) {
     for (int i=0;i<NCOLOURS;i++) {
         if (available_colours[i]) {
             n->next_colour = i;
+            free(available_colours);
             return true;
         }
     }
+    free(available_colours);
     return false;
 }
 
@@ -225,7 +235,7 @@ bool change_and_propagate(Node *n, Graph *g) {
     //make change!
     for (int i=0;i<n->nneighbours;i++) {
         n->neighbours[i]->neighbour_colours[n->next_colour]++;
-        n->neighbours[i]->neighbour_colours[n->colour]--;
+        if (n->colour != -1) n->neighbours[i]->neighbour_colours[n->colour]--;
     }
     n->colour = n->next_colour;
     n->next_colour = -1;
@@ -263,8 +273,7 @@ void choose_next(Node **next_node, int *next_colour, Graph *g) {
     int colourind = 0;
     // choose next node
     if (DEBUG) puts("Finding next node");
-    int *constrained_order = find_most_constrained(g);
-    *next_node = &g->nodes[constrained_order[0]];
+    *next_node = choose_next_node(g);
     //choose  next colour
     if (DEBUG) puts("Finding next colour");
     // make sure node colour is possible - if not, return (colour is set to default of -1)
@@ -274,7 +283,6 @@ void choose_next(Node **next_node, int *next_colour, Graph *g) {
         colourind++;
     }
     *next_colour = rarest_colours[colourind];
-    free(constrained_order);
     free(rarest_colours);
 }
 
@@ -292,14 +300,21 @@ void solver(Node *next_node, int next_node_colour, Graph *g, int ncoloured) {
     return;
 }
 
-void solve(int *n1ind, int *n2ind) {
-    // TODO: free graph on failure
-    Graph graph = construct_graph(n1ind, n2ind);
-    Node *firstnode = &graph.nodes[find_most_constrained(&graph)[0]];
+struct Result solve(int *n1arr, int *n2arr, int nnodes, int nedges) {
+    NNODES = nnodes; NEDGES = nedges;
+    Graph graph = construct_graph(n1arr, n2arr);
+    Node *firstnode = choose_next_node(&graph);
     solver(firstnode, 0, &graph, 1);
     if (DETAILEDRES) print_colour_state(&graph);
-    print_output(&graph);
+    if (PRINTSTATE) print_state(&graph);
     if (!check_valid(&graph)) puts("ERROR INVALID SOLUTION");
+    int *colours = malloc(NNODES * sizeof(int));
+    for (int i=0;i<NNODES;i++) {
+        colours[i] = graph.nodes[i].colour;
+    }
+    struct Result res = {NCOLOURS, NNODES, colours};
+    free_graph(&graph);
+    return res;
 }
 
 void save_colourstate(int ncoloured, Graph *g) {
@@ -333,19 +348,19 @@ void print_neighbours(Graph *g) {
     }
 }
 
-void print_output(Graph *g) {
-    if (PRINTSTATE) {
-        for (int i=0;i<NNODES;i++) {
-            for (int j=0;j<NNODES;j++) {
-                printf("%02d ", g->colourstate[i][j]);
-            }
-            puts("");
+void print_state(Graph *g) {
+    for (int i=0;i<NNODES;i++) {
+        for (int j=0;j<NNODES;j++) {
+            printf("%02d ", g->colourstate[i][j]);
         }
-    } else {
-        printf("%d 0\n", NCOLOURS);
-        for (int i=0;i<NNODES;i++) printf("%d ",g->nodes[i].colour);
         puts("");
     }
+}
+
+void print_output(struct Result res) {
+    printf("%d 0\n", NCOLOURS);
+    for (int i=0;i<NNODES;i++) printf("%d ",res.colours[i]);
+    puts("");
 }
 
 struct Tuple parse_file(char *fpath) {
@@ -354,14 +369,15 @@ struct Tuple parse_file(char *fpath) {
         perror ("Error opening file"); //or return 1;
         exit(1);
     }
-    fscanf(myfile, "%d %d", &NNODES, &NEDGES);
-    int *n1ind = malloc(NEDGES * sizeof(int));
-    int *n2ind = malloc(NEDGES * sizeof(int));
-    for (int i=0; i<(NEDGES); i++) {
+    int nnodes; int nedges;
+    fscanf(myfile, "%d %d", &nnodes, &nedges);
+    int *n1ind = malloc(nedges * sizeof(int));
+    int *n2ind = malloc(nedges * sizeof(int));
+    for (int i=0; i<(nedges); i++) {
         fscanf(myfile, "%d %d", &n1ind[i], &n2ind[i]);
     }
     fclose(myfile);
-    struct Tuple tup = {n1ind, n2ind};
+    struct Tuple tup = {n1ind, n2ind, nnodes, nedges};
     return tup;
 }
 
@@ -369,7 +385,7 @@ bool check_valid(Graph *g) {
     for (int i=0;i<NNODES;i++) {
         Node n = g->nodes[i];
         for (int j=0;j<n.nneighbours;j++) {
-            if (n.colour == n.neighbours[j]->colour) {
+            if (n.colour == -1 || (n.colour == n.neighbours[j]->colour)) {
                 return false;
             }
         }
@@ -389,5 +405,6 @@ int main(int argc, char *argv[]) {
         if (strcmp(argv[i],"-s") == 0) PRINTSTATE = true;
     }
     struct Tuple tup = parse_file(argv[1]);
-    solve(tup.arr1, tup.arr2);
+    struct Result res = solve(tup.n1arr, tup.n2arr, tup.nnodes, tup.nedges);
+    print_output(res);
 }
