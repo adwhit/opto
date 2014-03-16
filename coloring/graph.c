@@ -199,7 +199,6 @@ bool can_change_colour(Node *n, int from_node_index, int orig_node_index, int de
                 return true;
             }
         }
-        puts("FAIL");
     }
     if (depth <= 0) {
         if (DEBUG) printf("CC Node %d is not free\n",n->index);
@@ -259,33 +258,49 @@ void reset_next_colour(Graph *g) {
     }
 }
 
-void set_and_propagate(Node *next_node, int next_node_colour, Graph *g) {
-    if (next_node_colour == -1) {  
-        // no free colours - try to change surrounding nodes
-        if (VERBOSE) printf("Attempting to change neighbours of %d\n",next_node->index);
-        if (can_change_colour(next_node, -1,-2, MAXSEARCHDEPTH)) {
-            if (VERBOSE)  {
-                printf("Propagating change from node %d c%d -> c%d\n", next_node->index, next_node->colour, next_node->next_colour);
-                print_colour_state(g);
-            }
-            change_and_propagate(next_node, g, MAXSEARCHDEPTH);
-            reset_next_colour(g);
-            return;
-        } else {
-            //increase ncolours
-            NCOLOURS++;
-            if (VERBOSE) printf("Failed - incresing ncolours to %d\n", NCOLOURS);
-            next_node_colour = NCOLOURS - 1;
-            reset_next_colour(g);
+void update_node_colour(Node *n) {
+    for (int i=0;i<n->nneighbours;i++) {
+        n->neighbours[i]->neighbour_colours[n->next_colour]++;
+        if (n->colour != -1) {
+            n->neighbours[i]->neighbour_colours[n->colour]--;
         }
     }
-    if (VERBOSE) printf("Setting node %d to colour %d\n", next_node->index, next_node_colour);
-    //set
-    next_node->colour = next_node_colour;
-    //propagate - remove colour from nearby nodes
-    for (int j=0;j<next_node->nneighbours;j++) {
-        next_node->neighbours[j]->neighbour_colours[next_node_colour]++;
+    n->colour = n->next_colour;
+    n->next_colour = -1;
+}
+
+void set_and_propagate(Node *n, int next_colour, Graph *g) {
+    if (next_colour == -1) {  
+        // no free colours - try to change surrounding nodes
+        if (VERBOSE) printf("Attempting to change neighbours of %d\n",n->index);
+        bool *available_colours = malloc(NCOLOURS * sizeof(bool));
+        //set default to true
+        for (int i=0;i<NCOLOURS;i++) available_colours[i] = true;
+        for (int i=0;i<n->nneighbours;i++) {
+            if ((n->neighbours[i]->colour != -1) && (!can_change_colour(n->neighbours[i], n))) {
+                available_colours[n->neighbours[i]->colour] = false;
+            }
+        }
+        for (int i=0;i<NCOLOURS;i++) {
+            if (available_colours[i]) {
+                //success - propagate: change each neighbour with chosen colour
+                n->next_colour = i;
+                for (int i=0;i>n->nneighbours;i++) {
+                    if (n->neighbours[i]->colour == i) {
+                        update_node_colour(n->neighbours[i]);
+                    }
+                }
+                update_node_colour(n);
+                return;
+            }
+        }
+    } else {
+        //increase ncolours
+        NCOLOURS++;
+        if (VERBOSE) printf("Failed - incresing ncolours to %d\n", NCOLOURS);
+        n->next_colour = NCOLOURS - 1;
     }
+    if (VERBOSE) printf("Setting node %d to colour %d\n", n->index, next_colour);
 }
 
 void choose_next(Node **next_node, int *next_colour, Graph *g) {
