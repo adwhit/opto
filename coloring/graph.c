@@ -55,12 +55,15 @@ bool PRINTSTATE = false;
 void print_colours(Graph *g);
 void print_colour_state(Graph *g);
 void print_output(struct Result res);
-void save_colourstate(int iter, Graph *g);
-int nposscolours(Node *n);
 void print_state(Graph *g);
 void print_neighbours(Graph *g);
-void print_kemp_chain(int *chain);
-bool check_valid(Graph *g);
+void print_kemp_chain(int *chain, Graph *g);
+bool check_valid(Graph *g, bool check_notset);
+void save_colourstate(int iter, Graph *g);
+int nposscolours(Node *n);
+bool can_change_colour(Node *n);
+void reset_next_colour(Graph *g);
+void update_all_nodes(int *chain, Graph *g);
 
 int cmp_node_nneighbours(const void *v1, const void *v2) {
     const Node *i1 = *(const Node **)v1;
@@ -71,9 +74,8 @@ int cmp_node_nneighbours(const void *v1, const void *v2) {
     return i1->nneighbours > i2->nneighbours ? -1 : (i1->nneighbours < i2->nneighbours);
 }
 
-int *node_argsort_nneighbours(Node *array) {
+int *node_argsort_nneighbours(Node *array, int *position) {
     Node **parray = malloc(NNODES * sizeof(Node *));
-    int *position = malloc(NNODES * sizeof(int));
     for(int i = 0; i < NNODES; i++) parray[i] = &array[i];
     qsort(parray, NNODES, sizeof(Node *), cmp_node_nneighbours);
     for(int i = 0;i < NNODES;i++) position[i] = (parray[i] - array);
@@ -85,8 +87,11 @@ Node *choose_next_node(Graph *g) {
     /*for (int i=0;i<NNODES;i++) {
         if (g->nodes[i].colour == -1) return &g->nodes[i];
     }*/
-    int *position = node_argsort_nneighbours(g->nodes);
-    return &g->nodes[position[0]];
+    int *position = malloc(NNODES * sizeof(int));
+    node_argsort_nneighbours(g->nodes, position);
+    int val = position[0];
+    free(position);
+    return &g->nodes[val];
 }
 
 int cmp_colour_freq(const void *v1, const void *v2) {
@@ -97,9 +102,8 @@ int cmp_colour_freq(const void *v1, const void *v2) {
     return 0;
 }
 
-int *colour_freq_sort(int *array) {
+int *colour_freq_sort(int *array, int *position) {
     int **parray = malloc(NCOLOURS * sizeof(int *));
-    int *position = malloc(NCOLOURS * sizeof(int));
     for(int i = 0; i < NCOLOURS; i++) parray[i] = &array[i];
     qsort(parray, NCOLOURS, sizeof(int *), cmp_colour_freq);
     if (DEBUG) for (int i=0;i<NCOLOURS;i++) {
@@ -118,8 +122,7 @@ int *colour_counts(Graph *g) {
     return counts;
 }
 
-int *free_colour_counts(Graph *g) {
-    int *counts = calloc(NCOLOURS, sizeof(int));
+int *free_colour_counts(int* counts, Graph *g) {
     for (int i=0;i<NNODES;i++) {
         for (int j=0;j<NCOLOURS;j++) {
             if (g->nodes[i].neighbour_colours[j]==0) counts[j]++;
@@ -128,21 +131,21 @@ int *free_colour_counts(Graph *g) {
     return counts;
 }
 
-int *find_rarest_colours(Graph *g) {
-    int *counts = free_colour_counts(g);
-    int *positions = colour_freq_sort(counts);
+void find_rarest_colours(Graph *g, int * position) {
+    int *counts = calloc(NCOLOURS, sizeof(int));
+    free_colour_counts(counts, g);
+    colour_freq_sort(counts, position);
     if (DEBUG) {
         puts("color count ranking");
         for (int i=0;i <NCOLOURS; i++) {
-            printf("Rank: %d Index: %d  Counts %d\n",i, positions[i], counts[positions[i]]);
+            printf("Rank: %d Index: %d  Counts %d\n",i, position[i], counts[position[i]]);
         }
     }
     free(counts);
-    return positions;
 }
 
 Graph construct_graph(int *n1inds,int *n2inds) {
-    //initialise graph and nodes. Possible cffi entry point
+    //initialise graph and nodes
     Graph g = {
         calloc(NNODES,sizeof(Node)),                //Node list
         malloc(NNODES * sizeof(int *))};            //Colour state
@@ -189,18 +192,108 @@ int nposscolours(Node *n) {
     return nposs;
 }
 
-void find_kemp_chain(Node *n, int othercolour, int *chain) {
-    chain[n->index] = n->colour;
-    n->next_colour = othercolour;
+bool find_kemp_chain(Node *n, Node *root, int *chain, int othercolour) {
+    //if (DEBUG) printf("KC: at node %d, colour %d, othercolour %d, root %d\n", 
+    //        n->index, n->colour, othercolour, root->index);
+    chain[n->index] = othercolour;
+    // if node can change into a different colour, terminate immediately
+    //if (can_change_colour(n)) { chain[n->index] = n->next_colour; return true; }
+    //if node is neighbour of original node but wrong colour, return false
     for (int i=0;i<n->nneighbours;i++) {
-        if (n->neighbours[i]->colour == othercolour && chain[n->neighbours[i]->index] == -1) {
-            find_kemp_chain(n->neighbours[i], n->colour, chain);
+        if (n->neighbours[i]->index == root->index 
+            && chain[n->index] == chain[root->index])
+                return false;
+    }
+    bool success = true;
+    for (int i=0;i<n->nneighbours;i++) {
+        // various logical checks on neighbours
+        if (n->neighbours[i]->colour == othercolour       //equals other colour
+           && (chain[n->neighbours[i]->index] == -1)      //not already visited
+           && (!find_kemp_chain(n->neighbours[i], root, chain, n->colour))) {
+                success = false;
         }
+    }
+    return success;
+}
+
+void free_chains(int **wins, int *wrk, int *cct) {
+    for (int i=0;i<NCOLOURS;i++) free(wins[i]);
+    free(wins);
+    free(wrk);
+    free(cct);
+}
+    
+bool found_kemp_colour(Node *root, Node *n, int col, int *working_chain, int *win_chain) {
+    working_chain[root->index] = n->colour;
+    if (DEBUG) printf("Trying node %d, colour %d\n", n->index, col);
+    if (col != n->colour && find_kemp_chain(n, root, working_chain, col)) {
+        //found a chain  - add to respective win chain
+        for (int k=0;k<NNODES;k++) {
+            if (working_chain[k] != -1) win_chain[k] = working_chain[k];
+        }
+        return true;
+    }
+    return false;
+}
+
+bool have_win(int *colourct, Node *n, Node *root) {
+    if (colourct[n->colour] == root->neighbour_colours[n->colour]) {
+        if (VERBOSE) printf("Found kemp chain, node %d\n", root->index);
+        return true;
+    } else {
+        return false;
     }
 }
 
+bool kemp_change(Node *root, Graph *g) {
+    if (VERBOSE) printf("Attempting to find kemp chain from root %d\n",root->index);
+    //allocations
+    bool success = false;
+    int *working_chain = malloc(NNODES * sizeof(int));
+    for (int i=0;i<NNODES;i++) working_chain[i] = -1;
+    int **win_chains = malloc(NCOLOURS * sizeof(int *));
+    for (int i=0;i<NCOLOURS;i++) win_chains[i] = malloc(NNODES * sizeof(int));
+    for (int i=0;i<NCOLOURS;i++) 
+        for (int j=0;j<NNODES;j++) win_chains[i][j] = -1;
+    int *colourct = calloc(NCOLOURS, sizeof(int));
+    // for each neighbour, try to find kemp chain for each colour
+    for (int i=0;i<root->nneighbours;i++) {
+        Node *neighbour = root->neighbours[i];
+        if (neighbour->colour == -1) continue;
+        // try each colour in turn
+        for (int j=0;j<NCOLOURS;j++) {
+            if (found_kemp_colour(root, neighbour, j, working_chain, win_chains[neighbour->colour])) {
+                if (VERBOSE) printf("Found chain, neighbour %d, from_colour %d to_colour %d\n", neighbour->index, neighbour->colour, j);
+                colourct[neighbour->colour]++;
+                if (DEBUG) print_kemp_chain(win_chains[neighbour->colour], g);
+                if (have_win(colourct, neighbour, root)) {
+                    if (DEBUG) {
+                        puts("WIN WIN WIN");
+                        print_colour_state(g);
+                        print_kemp_chain(win_chains[neighbour->colour], g);
+                    }
+                    update_all_nodes(win_chains[neighbour->colour], g);
+                    success = true;
+                    goto freer;
+                } else {
+                    //fast forward
+                    j = NCOLOURS;
+                }
+            }
+            for (int i=0;i<NNODES;i++) working_chain[i] = -1;  //memset -1
+            reset_next_colour(g);
+        }
+    }
+freer: free_chains(win_chains, working_chain, colourct);
+    return success;
+}
+
 void update_node_colour(Node *n) {
-    if (VERBOSE) printf("Setting node %d to colour %d\n", n->index, n->next_colour);
+    if (n->next_colour == -1) return;
+    if (VERBOSE) {
+        if (n->colour == -1) printf("Setting node %d to colour %d\n", n->index, n->next_colour);
+        else printf("Changing node %d from colour %d to colour %d\n", n->index, n->colour, n->next_colour);
+    }
     for (int i=0;i<n->nneighbours;i++) {
         n->neighbours[i]->neighbour_colours[n->next_colour]++;
         if (n->colour != -1) {
@@ -208,6 +301,13 @@ void update_node_colour(Node *n) {
         }
     }
     n->colour = n->next_colour;
+}
+
+void update_all_nodes(int *chain, Graph *g) {
+    for (int i=0;i<NNODES;i++) {
+        if (chain[i] != -1) g->nodes[i].next_colour = chain[i];
+        update_node_colour(&g->nodes[i]);
+    }
 }
 
 bool can_change_colour(Node *n) {
@@ -224,14 +324,8 @@ void reset_next_colour(Graph *g) {
     for (int i=0;i<NNODES;i++) g->nodes[i].next_colour = -1;
 }
 
-void set_and_propagate(Node *n, int next_colour, Graph *g) {
-    if (nposscolours(n) > 0) {
-        // if can add immediately, do so
-        n->next_colour = next_colour;
-        update_node_colour(n);
-        return;
-    }
-    // no free colours - try to change surrounding nodes
+bool change_neighbour(Node *n, int next_colour) {
+    bool success = false;
     if (VERBOSE) printf("Attempting to change neighbours of %d\n",n->index);
     bool *available_colours = malloc(NCOLOURS * sizeof(bool));
     //set default to true
@@ -249,10 +343,26 @@ void set_and_propagate(Node *n, int next_colour, Graph *g) {
                 if (n->neighbours[j]->colour == i)  update_node_colour(n->neighbours[j]);
             }
             update_node_colour(n);
-            return;
+            success = true;
+            break;
         }
     }
-    //no luck, so increase ncolours
+    free(available_colours);
+    return success;
+}
+
+void set_node(Node *n, int next_colour, Graph *g) {
+    if (nposscolours(n) > 0) {
+        // if can add immediately, do so
+        n->next_colour = next_colour;
+        update_node_colour(n);
+        return;
+    }
+    // no free colours - try to change surrounding nodes
+    if (change_neighbour(n, next_colour)) return;
+    //no luck, try mangling a kemp chain
+    if (kemp_change(n, g)) return;
+    //OK, give up and add another colour
     NCOLOURS++;
     if (VERBOSE) printf("Failed - incresing ncolours to %d\n", NCOLOURS);
     n->next_colour = NCOLOURS - 1;
@@ -268,7 +378,8 @@ void choose_next(Node **next_node, int *next_colour, Graph *g) {
     if (DEBUG) puts("Finding next colour");
     // make sure node colour is possible - if not, return (colour is set to default of -1)
     if (nposscolours(*next_node) <= 0) return;
-    int *rarest_colours = find_rarest_colours(g);
+    int *rarest_colours = malloc(NCOLOURS * sizeof(int));
+    find_rarest_colours(g, rarest_colours);
     while ((*next_node)->neighbour_colours[rarest_colours[colourind]]!=0) {
         colourind++;
     }
@@ -277,7 +388,8 @@ void choose_next(Node **next_node, int *next_colour, Graph *g) {
 }
 
 void solver(Node *next_node, int next_node_colour, Graph *g, int ncoloured) {
-    set_and_propagate(next_node, next_node_colour, g);
+    printf("%d\n", ncoloured);
+    set_node(next_node, next_node_colour, g);
     reset_next_colour(g);
     save_colourstate(ncoloured, g);
     if (DEBUG) print_colour_state(g);
@@ -298,25 +410,11 @@ struct Result solve(int *n1arr, int *n2arr, int nnodes, int nedges) {
     solver(firstnode, 0, &graph, 1);
     if (DETAILEDRES) print_colour_state(&graph);
     if (PRINTSTATE) print_state(&graph);
-    if (!check_valid(&graph)) puts("ERROR INVALID SOLUTION");
+    if (!check_valid(&graph, true)) puts("ERROR INVALID SOLUTION");
     int *colours = malloc(NNODES * sizeof(int));
     for (int i=0;i<NNODES;i++) {
         colours[i] = graph.nodes[i].colour;
     }
-
-    //Kemp chain thing
-    int *chain= malloc(NNODES * sizeof(int));
-    for (int i=0;i<NNODES;i++) chain[i] = -1;
-    int othercolour= 8;
-    int initnode = 0;
-    find_kemp_chain(&graph.nodes[initnode], othercolour, chain);
-    print_kemp_chain(chain);
-
-
-
-
-
-
     struct Result res = {NCOLOURS, NNODES, colours};
     free_graph(&graph);
     return res;
@@ -339,23 +437,25 @@ void print_colour_state(Graph *g) {
     for (int i=0;i<NNODES;i++) {
         printf("Node %02d: | ", i);
         for (int j=0;j<NCOLOURS;j++) {
-            if (g->nodes[i].colour == -1) printf("_ ");
-            else if (g->nodes[i].neighbour_colours[j]==0) printf("0 ");
-            else if (g->nodes[i].neighbour_colours[j]==1) printf("1 ");
-            else printf(". ");
+            if (g->nodes[i].colour == j) printf(" X ");
+            else printf("%02d ",g->nodes[i].neighbour_colours[j]);
         }
-        if (g->nodes[i].colour == -1) printf("|XX");
-        else printf("|%02d", g->nodes[i].colour);
         if (g->nodes[i].next_colour == -1) printf("|\n");
         else printf("|%02d|\n", g->nodes[i].next_colour);
     }
 }
 
-void print_kemp_chain(int *chain) {
+void print_kemp_chain(int *chain, Graph *g) {
+    printf("Node   : ");
     for (int i=0;i<NNODES;i++) {
         printf("%02d ", i);
     }
-    puts("");
+    printf("\nCurrent: ");
+    for (int i=0;i<NNODES;i++) {
+        if (g->nodes[i].colour != -1) printf("%02d ",g->nodes[i].colour);
+        else printf(".  ");
+    }
+    printf("\nNextCol: ");
     for (int i=0;i<NNODES;i++) {
         if (chain[i] != -1) printf("%02d ",chain[i]);
         else printf(".  ");
@@ -406,12 +506,17 @@ struct Tuple parse_file(char *fpath) {
     return tup;
 }
 
-bool check_valid(Graph *g) {
+bool check_valid(Graph *g, bool check_notset) {
     bool rtn = true;
     for (int i=0;i<NNODES;i++) {
         Node n = g->nodes[i];
         for (int j=0;j<n.nneighbours;j++) {
-            if (n.colour == -1 || (n.colour == n.neighbours[j]->colour)) {
+            if (n.colour == -1 && check_notset) {
+                printf("Error: node %d not set\n", n.index);
+                rtn = false;
+            } else if (n.colour != -1 
+                    && n.colour == n.neighbours[j]->colour 
+                    && n.index < n.neighbours[j]->index) {
                 printf("Error: nodes %d and %d are both colour %d\n", n.index, n.neighbours[j]->index, n.colour);
                 rtn = false;
             }
@@ -434,4 +539,5 @@ int main(int argc, char *argv[]) {
     struct Tuple tup = parse_file(argv[1]);
     struct Result res = solve(tup.n1arr, tup.n2arr, tup.nnodes, tup.nedges);
     print_output(res);
+    free(res.colours);
 }
