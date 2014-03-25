@@ -4,9 +4,11 @@
 #include <stdint.h>
 #include <time.h>
 #include <math.h>
+#include <string.h>
 
 int NNODES;
 int NGENES;
+int VERBOSE;
 
 typedef struct {
     uint8_t *bytes;
@@ -17,11 +19,6 @@ typedef struct {
     double x;
     double y;
 } Node;
-
-struct HoF {
-    Gene g;
-    struct HoF *next;
-};
 
 typedef enum {false, true} bool;
 
@@ -156,14 +153,16 @@ void gen_genes(Gene *genes, int n) {
 }
 
 void print_gene(Gene *g) {
-    /*for (int i=0;i<NNODES;i++) {*/
-        /*printf("%d ", g->bytes[i]);*/
-    /*}*/
-    printf("Score: %0.2f\n", g->score);
+    for (int i=0;i<NNODES;i++) {
+        printf("%d,", g->bytes[i]);
+    }
+    printf("\nScore: %f\n", g->score);
 }
 
-void print_population(Gene *genes) {
-    for (int i=0;i<NGENES;i++) {
+void print_population(Gene *genes, int ngenes) {
+    printf("---Population---\n");
+    for (int i=0;i<ngenes;i++) {
+        printf("Gene %d:\n", i);
         print_gene(&genes[i]);
     }
 }
@@ -220,18 +219,26 @@ Gene *step(Gene *population) {
 }
 
 bool is_same(Gene *g1, Gene *g2) {
+    for (int i=0;i<NNODES;i++) {
+        if (g1->bytes[i] != g2->bytes[i]) return false;
+    }
+    return true;
 }
 
 bool add_to_hof(Gene g, Gene *hof) {
     int hofsize = 10;
     for (int i=0;i<hofsize;i++) {
         if (g.score < hof[i].score) {
+            //we have a winner
             free(hof[hofsize-1].bytes);
             for (int j=hofsize-1;j>i;j--) {
                 hof[j-1] = hof[j];
             }
             hof[i] = clone(&g);
             return true;
+        } else if (is_same(&g, &hof[i])) {
+            //seen it before
+            return false;
         }
     }
     return false;
@@ -239,26 +246,30 @@ bool add_to_hof(Gene g, Gene *hof) {
 
 void evolve(Gene *population, Node *nodes) {
     int ngens = 10000;
-    Gene *hof = malloc(10*sizeof *hof);
+    int hofsize = 10;
+    Gene *hof = malloc(hofsize*sizeof *hof);
     //init stuff
     score_and_sort(population, nodes);
-    for (int i=0;i<10;i++) {
+    for (int i=0;i<hofsize;i++) {
         hof[i] = clone(&population[i]);
-        printf("%.2f %d\n", hof[i].score, i);
     }
-    print_population_stats(population, hof, 0);
+    if (VERBOSE) print_population_stats(population, hof, 0);
+    int lastupdate = 0;
     //evolve
     for (int i=0;i<ngens;i++) {
         population = step(population);
         score_and_sort(population, nodes);
         int j=0;
-        bool added=true;
-        while (added) {
-            added = add_to_hof(population[j],hof);
-            j++;
+        while (1) {
+            if(add_to_hof(population[j],hof)) {
+                lastupdate = i;
+                j++;
+            } else break;
         }
-        print_population_stats(population, hof, i+1);
+        if (VERBOSE) print_population_stats(population, hof, i+1);
+        if (i - lastupdate >= 50) break;  //no improvements
     }
+    print_population(hof, hofsize);
 }
 
 void init() {
@@ -269,12 +280,19 @@ void init() {
     NNODES = x*y;
     Node *nodes = malloc(NNODES*sizeof *nodes);
     gen_grid(x, y, gap, nodes);
-    NGENES = 2000;
+    NGENES = 1000;
     Gene *genes = malloc(NGENES*sizeof *genes);
     gen_genes(genes, NGENES);
     evolve(genes, nodes);
 }
 
 int main(int argc, char*argv[]) {
+    /*if (argc < 2) {*/
+        /*printf("No file name specified\n");*/
+        /*exit(1);*/
+    /*}*/
+    for (int i=1;i<argc;i++) {
+        if (strcmp(argv[i],"-v") == 0) VERBOSE = true;
+    }
     init();
 }
