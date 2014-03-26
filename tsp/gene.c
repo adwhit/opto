@@ -11,7 +11,7 @@ int NGENES;
 int VERBOSE;
 
 typedef struct {
-    uint8_t *bytes;
+    short *bytes;
     double score;
 } Gene;
 
@@ -23,6 +23,7 @@ typedef struct {
 typedef enum {false, true} bool;
 
 void print_pos(int *pos);
+void pyffi(int nnodes, double *xs, double *ys, int verbose);
 
 int cmp_doubles(const void *v1, const void *v2) {
     const double i1 = **(const double **)v1;
@@ -41,17 +42,17 @@ int cmp_genes(const void *v1, const void *v2) {
 }
 
 int cmp_bytes(const void *v1, const void *v2) {
-    const uint8_t i1 = **(const uint8_t **)v1;
-    const uint8_t i2 = **(const uint8_t **)v2;
+    const short i1 = **(const short **)v1;
+    const short i2 = **(const short **)v2;
     if (i1 < i2) return -1;
     if (i1 > i2) return 1;
     return 0;
 }
 
-void bytes_argsort(uint8_t *array, int arraysize, int *position) {
-    uint8_t **parray = malloc(arraysize * sizeof(uint8_t *));
+void bytes_argsort(short *array, int arraysize, int *position) {
+    short **parray = malloc(arraysize * sizeof(short *));
     for(int i = 0; i<arraysize; i++) parray[i] = &array[i];
-    qsort(parray, arraysize, sizeof(uint8_t *), cmp_bytes);
+    qsort(parray, arraysize, sizeof(short *), cmp_bytes);
     for(int i = 0;i<arraysize;i++) position[i] = (parray[i] - array);
     free(parray);
 }
@@ -97,35 +98,35 @@ void gen_grid(int x, int y, int gap, Node *nodes) {
 }
 
 Gene random_gene() {
-    Gene g = (Gene){malloc(NNODES*sizeof(uint8_t)), 0};
+    Gene g = (Gene){malloc(NNODES*sizeof(short)), 0};
     for (int i=0;i<NNODES;i++)
-        g.bytes[i] = (uint8_t)rand();
+        g.bytes[i] = (short)rand();
     return g;
 }
 
 Gene zero_gene() {
-    return (Gene){calloc(NNODES, sizeof(uint8_t)), 0};
+    return (Gene){calloc(NNODES, sizeof(short)), 0};
 }
 
-Gene clone(Gene *g) {
-    Gene clone = (Gene){malloc(NNODES * sizeof(uint8_t)), g->score};
+Gene cloner(Gene *g) {
+    Gene clone = (Gene){malloc(NNODES * sizeof(short)), g->score};
     for (int i=0;i<NNODES;i++) 
         clone.bytes[i] = g->bytes[i];
     return clone;
 }
 
 Gene bit_cross(Gene *g1, Gene *g2) {
-    Gene g = (Gene){malloc(NNODES * sizeof(uint8_t)),0};
-    uint8_t b;
+    Gene g = (Gene){malloc(NNODES * sizeof(short)),0};
+    short b;
     for (int i=0;i<NNODES;i++) {
-        b = (uint8_t)rand();
+        b = (short)rand();
         g.bytes[i] = (g1->bytes[i] & b) | (g2->bytes[i] & !b);
     }
     return g;
 }
 
 Gene byte_cross(Gene *g1, Gene *g2) {
-    Gene g = (Gene){malloc(NNODES * sizeof(uint8_t)),0};
+    Gene g = (Gene){malloc(NNODES * sizeof(short)),0};
     for (int i=0;i<NNODES;i++) {
         if (rand()%2) {
             g.bytes[i] = g1->bytes[i];
@@ -137,10 +138,10 @@ Gene byte_cross(Gene *g1, Gene *g2) {
 }
 
 Gene mutate(Gene *g1, double p) {
-    Gene g = clone(g1);
+    Gene g = cloner(g1);
     for (int i=0;i<NNODES;i++) {
         if ((double)rand()/(double)RAND_MAX < p) {
-            g.bytes[i] = g.bytes[i] ^ (uint8_t)rand();
+            g.bytes[i] = g.bytes[i] ^ (short)rand();
         }
     }
     return g;
@@ -159,11 +160,21 @@ void print_gene(Gene *g) {
     printf("\nScore: %f\n", g->score);
 }
 
+void print_result(Gene *g) {
+    int *position = malloc(NNODES * sizeof *position);
+    bytes_argsort(g->bytes,NNODES,position);
+    for (int i=0;i<NNODES;i++) {
+        printf("%d,",position[i]);
+    }
+    printf("\nScore: %.2f\n", g->score);
+    free(position);
+}
+
 void print_population(Gene *genes, int ngenes) {
     printf("---Population---\n");
     for (int i=0;i<ngenes;i++) {
         printf("Gene %d:\n", i);
-        print_gene(&genes[i]);
+        print_result(&genes[i]);
     }
 }
 
@@ -193,86 +204,91 @@ void print_pos(int *pos) {
     puts("");
 }
 
-void free_population(Gene *population) {
-    for (int i=0;i<NGENES;i++) {
+void free_population(Gene *population, int popsize) {
+    for (int i=0;i<popsize;i++) {
         free(population[i].bytes);
     }
     free(population);
 }
 
-Gene *step(Gene *population) {
+Gene *next_generation(Gene *population) {
     //evolutionary step. Create new genes according to some strategy
     //free the old ones
-    double mutate_prob = 0.05;
+    double mutate_prob = 0.01;
+    int takebest = NGENES/2;
     Gene *genes = malloc(NGENES*sizeof *genes);
     for (int i=0;i<NGENES;i++) {
-        if (i<NGENES/2) {
-            genes[i] = mutate(&population[i%(NGENES/2)],mutate_prob);
-        } else {
-            int gi1 = rand() % (NGENES/2);
-            int gi2 = rand() % (NGENES/2);
+        if (i<2*NGENES/3) {
+            genes[i] = mutate(&population[rand()%takebest/4],mutate_prob);
+            //genes[i] = mutate(&population[i],mutate_prob);
+        } else if (i<NGENES) {
+            int gi1 = rand() % takebest;
+            int gi2 = rand() % takebest;
+            //int gi1 = i;
+            //int gi2 = rand() % NGENES;
             genes[i] = byte_cross(&population[gi1], &population[gi2]);
         }
     }
-    free_population(population);
+    free_population(population, NGENES);
     return genes;
 }
 
 bool is_same(Gene *g1, Gene *g2) {
-    for (int i=0;i<NNODES;i++) {
-        if (g1->bytes[i] != g2->bytes[i]) return false;
-    }
-    return true;
+    if ((g1->score - g2->score < 0.001) && (g1->score - g2->score > -0.001))
+        return true;
+    return false;
 }
 
-bool add_to_hof(Gene g, Gene *hof) {
-    int hofsize = 10;
+bool add_to_hof(Gene g, Gene *hof, int hofsize) {
     for (int i=0;i<hofsize;i++) {
+        if (is_same(&g, &hof[i])) return false;
         if (g.score < hof[i].score) {
             //we have a winner
             free(hof[hofsize-1].bytes);
             for (int j=hofsize-1;j>i;j--) {
-                hof[j-1] = hof[j];
+                hof[j] = hof[j-1];
             }
-            hof[i] = clone(&g);
+            hof[i] = cloner(&g);
             return true;
-        } else if (is_same(&g, &hof[i])) {
-            //seen it before
-            return false;
         }
     }
     return false;
 }
 
-void evolve(Gene *population, Node *nodes) {
+void evolve(Node *nodes) {
+    //init stuff
+    NGENES = 4000;
     int ngens = 10000;
     int hofsize = 10;
-    Gene *hof = malloc(hofsize*sizeof *hof);
-    //init stuff
+    Gene *hof = malloc(hofsize* sizeof *hof);
+    Gene *population = malloc(NGENES* sizeof *population);
+    gen_genes(population, NGENES);
     score_and_sort(population, nodes);
     for (int i=0;i<hofsize;i++) {
-        hof[i] = clone(&population[i]);
+        hof[i] = cloner(&population[i]);
     }
     if (VERBOSE) print_population_stats(population, hof, 0);
     int lastupdate = 0;
     //evolve
     for (int i=0;i<ngens;i++) {
-        population = step(population);
+        if (i - lastupdate >= 100) break;  //no improvements
+        population = next_generation(population);
         score_and_sort(population, nodes);
         int j=0;
         while (1) {
-            if(add_to_hof(population[j],hof)) {
+            if(add_to_hof(population[j],hof, hofsize)) {
                 lastupdate = i;
                 j++;
             } else break;
         }
         if (VERBOSE) print_population_stats(population, hof, i+1);
-        if (i - lastupdate >= 50) break;  //no improvements
     }
     print_population(hof, hofsize);
+    free_population(population, NGENES);
+    free_population(hof, hofsize);
 }
 
-void init() {
+void testgrid() {
     //srand(time(NULL));   // random seed
     int x=10;
     int y=10;
@@ -280,19 +296,43 @@ void init() {
     NNODES = x*y;
     Node *nodes = malloc(NNODES*sizeof *nodes);
     gen_grid(x, y, gap, nodes);
-    NGENES = 1000;
-    Gene *genes = malloc(NGENES*sizeof *genes);
-    gen_genes(genes, NGENES);
-    evolve(genes, nodes);
+    evolve(nodes);
+}
+
+void pyffi(int nnodes, double *xs, double *ys, int verbose) {
+    if (verbose == 1) VERBOSE = true;
+    NNODES = nnodes;
+    Node *nodes = malloc(NNODES*sizeof *nodes);
+    for (int i=0;i<NNODES;i++) {
+        nodes[i] = (Node){xs[i], ys[i]};
+        if (VERBOSE) printf("Node %d x %.2f y %.2f\n", i, nodes[i].x, nodes[i].y);
+    }
+    evolve(nodes);
+    free(nodes);
+}
+
+void print_hex(Gene *g) {
+    for (int i=0;i<NNODES;i++) {
+        printf("%04hx ", g->bytes[i]);
+    }
+    puts("");
 }
 
 int main(int argc, char*argv[]) {
-    /*if (argc < 2) {*/
-        /*printf("No file name specified\n");*/
-        /*exit(1);*/
-    /*}*/
+    // This entry point is just for tests
     for (int i=1;i<argc;i++) {
         if (strcmp(argv[i],"-v") == 0) VERBOSE = true;
     }
-    init();
+    NNODES = 10;
+    Gene g1 = zero_gene();
+    for (int i=0;i<NNODES;i++) {
+        g1.bytes[i] = 0xffff;
+    }
+    Gene g2 = zero_gene();
+    Gene g3 = byte_cross(&g1, &g2);
+    Gene g4 = bit_cross(&g1, &g2);
+    print_hex(&g1);
+    print_hex(&g2);
+    print_hex(&g3);
+    print_hex(&g4);
 }
