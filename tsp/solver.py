@@ -3,9 +3,11 @@
 
 import sys
 import os
+import viewer
 from cffi import FFI
 
 VERBOSE = False
+GRAPH = False
 
 def solve_it(input_data):
     lines = input_data.split("\n")
@@ -21,7 +23,7 @@ def solve_it(input_data):
         double score;
     } Gene;
 
-    void pyffi(int nnodes, double *xs, double *ys, int verbose);
+    int *pyffi(int nnodes, double *xs, double *ys, int verbose);
     """)
 
     if VERBOSE:
@@ -30,12 +32,22 @@ def solve_it(input_data):
         bit = 0
 
     lib = ffi.dlopen("libgene.so")
-    lib.pyffi(nnodes, xs, ys, bit)
+    route = lib.pyffi(nnodes, xs, ys, bit)
+
+    route = list(route[0:nnodes])
+
+    if GRAPH:
+        g = viewer.creategraph(route)
+        viewer.draw(g, arr)
+
+    return route
 
 if __name__ == '__main__':
-    if len(sys.argv) > 2:
-        if sys.argv[2] == "-v":
-            VERBOSE = True
+    if "-v" in sys.argv:
+        VERBOSE = True
+    if "-g" in sys.argv:
+        GRAPH = True
+
     if len(sys.argv) > 1:
         file_location = sys.argv[1].strip()
         input_data_file = open(file_location, 'r')

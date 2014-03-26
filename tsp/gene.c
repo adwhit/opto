@@ -5,10 +5,19 @@
 #include <time.h>
 #include <math.h>
 #include <string.h>
+#include <libconfig.h>
 
 int NNODES;
 int NGENES;
+int NGENS;
+int HOFSIZE;
 int VERBOSE;
+double MUTATE_PROB;
+double MUTATE_FRAC;
+double CROSS_FRAC;
+double SWAP_FRAC;
+double TAKE_FRAC;
+int TAKE_BEST;
 
 typedef struct {
     short *bytes;
@@ -23,7 +32,7 @@ typedef struct {
 typedef enum {false, true} bool;
 
 void print_pos(int *pos);
-void pyffi(int nnodes, double *xs, double *ys, int verbose);
+int *pyffi(int nnodes, double *xs, double *ys, int verbose);
 
 int cmp_doubles(const void *v1, const void *v2) {
     const double i1 = **(const double **)v1;
@@ -137,11 +146,36 @@ Gene byte_cross(Gene *g1, Gene *g2) {
     return g;
 }
 
-Gene mutate(Gene *g1, double p) {
+Gene bit_mutate(Gene *g1, double p) {
     Gene g = cloner(g1);
     for (int i=0;i<NNODES;i++) {
         if ((double)rand()/(double)RAND_MAX < p) {
             g.bytes[i] = g.bytes[i] ^ (short)rand();
+        }
+    }
+    return g;
+}
+
+Gene byte_mutate(Gene *g1, double p) {
+    Gene g = cloner(g1);
+    for (int i=0;i<NNODES;i++) {
+        if ((double)rand()/(double)RAND_MAX < p) {
+            g.bytes[i] = (short)rand();
+        }
+    }
+    return g;
+}
+
+Gene byte_swap(Gene *g1, double p) {
+    Gene g = cloner(g1);
+    short b1;
+    int b2ix;
+    for (int i=0;i<NNODES;i++) {
+        if ((double)rand()/(double)RAND_MAX < p) {
+            b1 = g.bytes[i];
+            b2ix = rand() % NNODES;
+            g.bytes[i] = g.bytes[b2ix];
+            g.bytes[b2ix] = b1;
         }
     }
     return g;
@@ -163,10 +197,13 @@ void print_gene(Gene *g) {
 void print_result(Gene *g) {
     int *position = malloc(NNODES * sizeof *position);
     bytes_argsort(g->bytes,NNODES,position);
+    printf("res = [");
     for (int i=0;i<NNODES;i++) {
         printf("%d,",position[i]);
+        if ((i+1)%15 == 0) puts("");
     }
-    printf("\nScore: %.2f\n", g->score);
+    puts("]");
+    printf("Score: %.2f\n", g->score);
     free(position);
 }
 
@@ -211,22 +248,31 @@ void free_population(Gene *population, int popsize) {
     free(population);
 }
 
+void wildcard(Gene *population) {
+    //randomly destroy some of the genes and replace
+}
+
 Gene *next_generation(Gene *population) {
     //evolutionary step. Create new genes according to some strategy
     //free the old ones
-    double mutate_prob = 0.01;
-    int takebest = NGENES/2;
+    int nbytemut = (int)(NGENES*MUTATE_FRAC);
+    int ncross = (int)(NGENES*CROSS_FRAC);
+    int nswap = (int)(NGENES*SWAP_FRAC);
+    int take_best = (int)(TAKE_FRAC*NGENES);
+
     Gene *genes = malloc(NGENES*sizeof *genes);
     for (int i=0;i<NGENES;i++) {
-        if (i<2*NGENES/3) {
-            genes[i] = mutate(&population[rand()%takebest/4],mutate_prob);
-            //genes[i] = mutate(&population[i],mutate_prob);
-        } else if (i<NGENES) {
-            int gi1 = rand() % takebest;
-            int gi2 = rand() % takebest;
-            //int gi1 = i;
-            //int gi2 = rand() % NGENES;
+        // possibility of mutate, cross, swap or clone
+        if (i < nbytemut) {
+            genes[i] = byte_mutate(&population[rand()%take_best],MUTATE_PROB);
+        } else if (i < nbytemut + ncross) {
+            int gi1 = rand() % take_best;
+            int gi2 = rand() % take_best;
             genes[i] = byte_cross(&population[gi1], &population[gi2]);
+        } else if (i < nbytemut + ncross + nswap) {
+            genes[i] = byte_swap(&population[rand() % take_best], MUTATE_PROB);
+        } else {
+            genes[i] = cloner(&population[rand() % take_best]);
         }
     }
     free_population(population, NGENES);
@@ -239,13 +285,13 @@ bool is_same(Gene *g1, Gene *g2) {
     return false;
 }
 
-bool add_to_hof(Gene g, Gene *hof, int hofsize) {
-    for (int i=0;i<hofsize;i++) {
+bool add_to_hof(Gene g, Gene *hof) {
+    for (int i=0;i<HOFSIZE;i++) {
         if (is_same(&g, &hof[i])) return false;
         if (g.score < hof[i].score) {
             //we have a winner
-            free(hof[hofsize-1].bytes);
-            for (int j=hofsize-1;j>i;j--) {
+            free(hof[HOFSIZE-1].bytes);
+            for (int j=HOFSIZE-1;j>i;j--) {
                 hof[j] = hof[j-1];
             }
             hof[i] = cloner(&g);
@@ -255,37 +301,34 @@ bool add_to_hof(Gene g, Gene *hof, int hofsize) {
     return false;
 }
 
-void evolve(Node *nodes) {
+Gene *evolve(Node *nodes) {
     //init stuff
-    NGENES = 4000;
-    int ngens = 10000;
-    int hofsize = 10;
-    Gene *hof = malloc(hofsize* sizeof *hof);
+    Gene *hof = malloc(HOFSIZE* sizeof *hof);
     Gene *population = malloc(NGENES* sizeof *population);
     gen_genes(population, NGENES);
     score_and_sort(population, nodes);
-    for (int i=0;i<hofsize;i++) {
+    for (int i=0;i<HOFSIZE;i++) {
         hof[i] = cloner(&population[i]);
     }
     if (VERBOSE) print_population_stats(population, hof, 0);
     int lastupdate = 0;
     //evolve
-    for (int i=0;i<ngens;i++) {
+    for (int i=0;i<NGENS;i++) {
         if (i - lastupdate >= 100) break;  //no improvements
         population = next_generation(population);
         score_and_sort(population, nodes);
         int j=0;
         while (1) {
-            if(add_to_hof(population[j],hof, hofsize)) {
+            if(add_to_hof(population[j],hof)) {
                 lastupdate = i;
                 j++;
             } else break;
         }
         if (VERBOSE) print_population_stats(population, hof, i+1);
     }
-    print_population(hof, hofsize);
+    print_population(hof, HOFSIZE);
     free_population(population, NGENES);
-    free_population(hof, hofsize);
+    return hof;
 }
 
 void testgrid() {
@@ -299,16 +342,32 @@ void testgrid() {
     evolve(nodes);
 }
 
-void pyffi(int nnodes, double *xs, double *ys, int verbose) {
+void set_globals(int nnodes, int verbose) {
     if (verbose == 1) VERBOSE = true;
     NNODES = nnodes;
+    NGENES = 4000;
+    TAKE_FRAC = 0.3;
+    MUTATE_PROB = 1.0/NNODES;
+    MUTATE_FRAC = 0.25;
+    CROSS_FRAC = 0.50;
+    SWAP_FRAC = 0.25;
+    NGENS = 10000;
+    HOFSIZE = 10;
+}
+
+int *pyffi(int nnodes, double *xs, double *ys, int verbose) {
+    set_globals(nnodes,verbose);
     Node *nodes = malloc(NNODES*sizeof *nodes);
     for (int i=0;i<NNODES;i++) {
         nodes[i] = (Node){xs[i], ys[i]};
         if (VERBOSE) printf("Node %d x %.2f y %.2f\n", i, nodes[i].x, nodes[i].y);
     }
-    evolve(nodes);
+    Gene *hof = evolve(nodes);
+    //return best
     free(nodes);
+    int *position = malloc(NNODES * sizeof *position);
+    bytes_argsort(hof[0].bytes,NNODES,position);
+    return position;
 }
 
 void print_hex(Gene *g) {
