@@ -7,11 +7,15 @@
 #include <string.h>
 #include <libconfig.h>
 
+#define NORM 4
+
 int NNODES;
 int NGENES;
 int NGENS;
 int HOFSIZE;
 int VERBOSE;
+int SNAPSHOTS;
+int NORMALIZER;
 double MUTATE_PROB;
 double MUTATE_FRAC;
 double CROSS_FRAC;
@@ -32,7 +36,7 @@ typedef struct {
 typedef enum {false, true} bool;
 
 void print_pos(int *pos);
-int *pyffi(int nnodes, double *xs, double *ys, int verbose);
+int *pyffi(int nnodes, double *xs, double *ys, int verbose, int snapshots);
 
 int cmp_doubles(const void *v1, const void *v2) {
     const double i1 = **(const double **)v1;
@@ -53,8 +57,8 @@ int cmp_genes(const void *v1, const void *v2) {
 int cmp_bytes(const void *v1, const void *v2) {
     const short i1 = **(const short **)v1;
     const short i2 = **(const short **)v2;
-    if (i1 < i2) return -1;
-    if (i1 > i2) return 1;
+    if (i1 /16 < i2 /16) return -1;
+    if (i1 /16 > i2 /16) return 1;
     return 0;
 }
 
@@ -207,6 +211,17 @@ void print_result(Gene *g) {
     free(position);
 }
 
+void print_snapshot(Gene *g) {
+    int *position = malloc(NNODES * sizeof *position);
+    bytes_argsort(g->bytes,NNODES,position);
+    for (int i=0;i<NNODES-1;i++) {
+        printf("%d ",position[i]);
+    }
+    printf("%d\n",position[NNODES-1]);
+    printf("%.2f\n", g->score);
+    free(position);
+}
+
 void print_population(Gene *genes, int ngenes) {
     printf("---Population---\n");
     for (int i=0;i<ngenes;i++) {
@@ -264,7 +279,8 @@ Gene *next_generation(Gene *population) {
     for (int i=0;i<NGENES;i++) {
         // possibility of mutate, cross, swap or clone
         if (i < nbytemut) {
-            genes[i] = byte_mutate(&population[rand()%take_best],MUTATE_PROB);
+            //genes[i] = byte_mutate(&population[rand()%take_best],MUTATE_PROB);
+            genes[i] = byte_mutate(&population[i],MUTATE_PROB);
         } else if (i < nbytemut + ncross) {
             int gi1 = rand() % take_best;
             int gi2 = rand() % take_best;
@@ -317,6 +333,7 @@ Gene *evolve(Node *nodes) {
         if (i - lastupdate >= 100) break;  //no improvements
         population = next_generation(population);
         score_and_sort(population, nodes);
+        if (SNAPSHOTS && i%20 == 0) print_snapshot(&population[0]);
         int j=0;
         while (1) {
             if(add_to_hof(population[j],hof)) {
@@ -326,7 +343,8 @@ Gene *evolve(Node *nodes) {
         }
         if (VERBOSE) print_population_stats(population, hof, i+1);
     }
-    print_population(hof, HOFSIZE);
+    if (SNAPSHOTS) print_snapshot(&hof[0]);
+        else print_population(hof, HOFSIZE);
     free_population(population, NGENES);
     return hof;
 }
@@ -342,21 +360,23 @@ void testgrid() {
     evolve(nodes);
 }
 
-void set_globals(int nnodes, int verbose) {
+void set_globals(int nnodes, int verbose, int snapshots) {
     if (verbose == 1) VERBOSE = true;
+    if (snapshots == 1) SNAPSHOTS = true;
     NNODES = nnodes;
-    NGENES = 4000;
-    TAKE_FRAC = 0.3;
+    NGENES = 5000;
+    TAKE_FRAC = 0.6;
     MUTATE_PROB = 1.0/NNODES;
-    MUTATE_FRAC = 0.25;
+    MUTATE_FRAC = 0.5;
     CROSS_FRAC = 0.50;
-    SWAP_FRAC = 0.25;
+    SWAP_FRAC = 0.0;
     NGENS = 10000;
     HOFSIZE = 10;
+    NORMALIZER = 2<<4;
 }
 
-int *pyffi(int nnodes, double *xs, double *ys, int verbose) {
-    set_globals(nnodes,verbose);
+int *pyffi(int nnodes, double *xs, double *ys, int verbose, int snapshots) {
+    set_globals(nnodes,verbose, snapshots);
     Node *nodes = malloc(NNODES*sizeof *nodes);
     for (int i=0;i<NNODES;i++) {
         nodes[i] = (Node){xs[i], ys[i]};
