@@ -5,7 +5,6 @@
 #include <time.h>
 #include <math.h>
 #include <string.h>
-#include <libconfig.h>
 
 #define NORM 4
 

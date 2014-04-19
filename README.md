@@ -8,7 +8,7 @@ The most interesting solution is assignment 3, the Euclidean Travelling Salemen 
 a genetic algorithm. At some point I would like to play with it more.
 
 The solutions are written in C and launched with python using the python CFFI library. The graphing is done with
-[graph-tool](http://http://graph-tool.skewed.de/).
+[graph-tool](http://graph-tool.skewed.de/).
 
 Example usage:
 
